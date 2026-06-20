@@ -25,7 +25,6 @@ class ResearcherStack(Stack):
         ingest_lambda_name = os.getenv("INGEST_LAMBDA_NAME", "finai-ingest")
         bedrock_region = os.getenv("BEDROCK_REGION", "us-east-1")
         researcher_model = os.getenv("RESEARCHER_MODEL", "bedrock/moonshotai.kimi-k2.5")
-        mcp_logging = os.getenv("MCP_LOGGING", "false")
 
         # Langfuse Environment Configuration for LLM Observability
         langfuse_public_key = os.getenv("LANGFUSE_PUBLIC_KEY", "")
@@ -280,7 +279,6 @@ class ResearcherStack(Stack):
                 "INGEST_LAMBDA_NAME": ingest_lambda_name,
                 "BEDROCK_REGION": bedrock_region,
                 "RESEARCHER_MODEL": researcher_model,
-                "MCP_LOGGING": mcp_logging,
                 # Langfuse Configuration
                 "LANGFUSE_PUBLIC_KEY": langfuse_public_key,
                 "LANGFUSE_SECRET_KEY": langfuse_secret_key,

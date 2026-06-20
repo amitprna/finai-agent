@@ -28,7 +28,7 @@ def get_embedding(text):
     )
 
     result = json.loads(response["Body"].read().decode())
-    print(result)
+
     # HuggingFace returns nested array [[[embedding]]], extract the actual embedding
     if isinstance(result, list) and len(result) > 0:
         if isinstance(result[0], list) and len(result[0]) > 0:

@@ -1,18 +1,15 @@
 FROM public.ecr.aws/awsguru/aws-lambda-adapter:1.0.0 AS lambda-adapter
 FROM python:3.12-slim
 
-ARG INSTALL_BUILD_ESSENTIAL=false
-
 WORKDIR /app
 
 ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright \
     HOME=/tmp \
     XDG_CACHE_HOME=/tmp/.cache
 
-# Install Node.js, build tools, and the Playwright MCP server.
+# Install Node.js and the Playwright MCP server.
 RUN apt-get update \
     && apt-get install -y curl \
-    && if [ "$INSTALL_BUILD_ESSENTIAL" = "true" ]; then apt-get install -y build-essential; fi \
     && curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
     && apt-get install -y nodejs \
     && npm install -g @playwright/mcp@0.0.75 \
