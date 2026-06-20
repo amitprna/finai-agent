@@ -1,0 +1,26 @@
+[project]
+name = "finai"
+version = "0.1.0"
+description = "FinAI dependecy manager"
+readme = "README.md"
+requires-python = ">=3.14"
+dependencies = [
+    "aws-cdk-lib>=2.258.1",
+    "boto3>=1.43.25",
+    "plotly>=6.8.0",
+    "python-dotenv>=1.2.2",
+    "streamlit>=1.58.0",
+]
+
+[tool.uv.workspace]
+members = [
+    "backend/api",
+    "backend/charter",
+    "backend/database",
+    "backend/planner",
+    "backend/reporter",
+    "backend/researcher",
+    "backend/retirement",
+    "backend/tagger"
+]
+
