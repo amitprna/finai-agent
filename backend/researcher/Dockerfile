@@ -3,11 +3,12 @@ FROM python:3.12-slim
 
 WORKDIR /app
 
+# Lambda only allows writing to /tmp
 ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright \
     HOME=/tmp \
     XDG_CACHE_HOME=/tmp/.cache
 
-# Install Node.js and the Playwright MCP server.
+# Install curl, Node.js which is required by the Playwright MCP server.
 RUN apt-get update \
     && apt-get install -y curl \
     && curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
@@ -33,6 +34,7 @@ COPY *.py ./
 COPY --from=lambda-adapter /lambda-adapter /opt/extensions/lambda-adapter
 
 # The FastAPI app listens on port 8000 inside the container.
+# Lambda Web Adapter to send all incoming requests directly to port 8000
 ENV AWS_LWA_PORT=8000
 
 # Expose the app port and run the web server.
