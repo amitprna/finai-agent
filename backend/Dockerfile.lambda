@@ -1,0 +1,21 @@
+FROM public.ecr.aws/lambda/python:3.12
+
+# Build arg: which agent to package (reporter, charter, retirement, planner, tagger)
+ARG AGENT_NAME
+
+# Install Python dependencies (no pruning needed — Docker images support up to 10GB)
+RUN pip install --no-cache-dir \
+    litellm>=1.75.5 \
+    pydantic>=2.11.7 \
+    python-dotenv>=1.1.1 \
+    langfuse==2.60.10
+
+# Install the shared database library
+COPY database/ /tmp/database/
+RUN pip install --no-cache-dir /tmp/database/ && rm -rf /tmp/database/
+
+# Copy agent Python files into the Lambda task root
+COPY ${AGENT_NAME}/*.py ${LAMBDA_TASK_ROOT}/
+
+# Lambda handler entry point
+CMD ["lambda_handler.lambda_handler"]

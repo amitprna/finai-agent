@@ -1,3 +1,9 @@
+"""
+Ingestion Tool for the Researcher Agent
+Defines the tool function exposed to the LLM agent, allowing it to invoke
+the ingestion Lambda pipeline directly with the compiled research summaries.
+"""
+
 import os
 from typing import Dict, Any
 from datetime import datetime, UTC
@@ -5,7 +11,10 @@ import json
 import boto3
 from agents import function_tool
 
-# Configuration from environment
+# ----------------------------------------------------
+# Configuration & Environment Reading
+# ----------------------------------------------------
+# Read physical Lambda name and target region parameters from environment variables
 INGEST_LAMBDA_NAME = os.getenv("INGEST_LAMBDA_NAME", "finai-ingest")
 AWS_REGION_NAME = os.getenv("AWS_REGION_NAME", "us-east-1")
 
@@ -13,21 +22,24 @@ AWS_REGION_NAME = os.getenv("AWS_REGION_NAME", "us-east-1")
 @function_tool
 def ingest_financial_document(topic: str, analysis: str) -> Dict[str, Any]:
     """
-    Ingest a financial document into the FinAI knowledge base.
+    Ingest a financial document containing parsed news/data into the vector database.
+    This function is wrapped as a tool and exposed to the LLM agent.
     
     Args:
-        topic: The topic or subject of the analysis (e.g., "AAPL Stock Analysis", "Retirement Planning Guide")
-        analysis: Detailed analysis or advice with specific data and insights
-    
+        topic: The topic/subject identifier of the research (e.g. "Tata Q1 Report")
+        analysis: Plaintext markdown summary compiled by the LLM scraping run
+        
     Returns:
-        Dictionary with success status and document ID
+        Dictionary mapping success status and document identifier uuid
     """
+    # Verify that the target ingestion Lambda name is configured
     if not INGEST_LAMBDA_NAME:
         return {
             "success": False,
-            "error": "Ingestion Lambda not configured. Running in local mode."
+            "error": "Ingestion pipeline function is not configured"
         }
     
+    # Construct the JSON payload mapping keys expected by the Ingestion Lambda
     document = {
         "text": analysis,
         "metadata": {
@@ -37,22 +49,29 @@ def ingest_financial_document(topic: str, analysis: str) -> Dict[str, Any]:
     }
     
     try:
+        # Initialize Boto3 Lambda client using targeted region properties
         lambda_client = boto3.client("lambda", region_name=AWS_REGION_NAME)
+        
+        # Invoke the Ingest Lambda function synchronously
         response = lambda_client.invoke(
             FunctionName=INGEST_LAMBDA_NAME,
-            InvocationType="RequestResponse",
+            InvocationType="RequestResponse",  # Synchronous execute
             Payload=json.dumps({"body": document})
         )
         
+        # Check HTTP response code
         status_code = response.get("StatusCode", 0)
         if status_code != 200:
-            raise Exception(f"Lambda invocation failed with status code {status_code}")
+            raise Exception(f"Lambda execution failed with HTTP status: {status_code}")
             
+        # Parse return payload binary stream
         result_payload = json.loads(response["Payload"].read().decode("utf-8"))
         
+        # Check if the execution returned a handled downstream error
         if isinstance(result_payload, dict) and "error" in result_payload:
             raise Exception(result_payload["error"])
             
+        # Extract response fields depending on structure
         if isinstance(result_payload, dict) and "body" in result_payload:
             if isinstance(result_payload["body"], str):
                 result_data = json.loads(result_payload["body"])

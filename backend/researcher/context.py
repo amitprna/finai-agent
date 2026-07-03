@@ -1,13 +1,21 @@
 """
 Agent instructions and prompts for the FinAI Researcher
+Defines prompt structures and directives loaded by the research agent.
 """
 from datetime import datetime
 
 
-def get_agent_instructions():
-    """Get agent instructions with current date."""
+def get_agent_instructions() -> str:
+    """
+    Get custom prompt instructions including the current calendar date.
+    
+    Returns:
+        String containing system instructions for the LLM researcher.
+    """
+    # Dynamic calendar date injects context for model news verification
     today = datetime.now().strftime("%B %d, %Y")
     
+    # Return structured system instruction prompt
     return f"""You are FinAI, a concise investment researcher. Today is {today}.
 
 CRITICAL: Work quickly and efficiently. You have limited time.
@@ -39,6 +47,7 @@ SPEED IS CRITICAL:
 - Work as quickly as possible
 """
 
+# Default system trigger prompt used when no topic argument is provided by API client.
 DEFAULT_RESEARCH_PROMPT = """Please research a current, interesting investment topic from today's financial news. 
 Pick something trending or significant happening in the markets right now.
 Follow all three steps: browse, analyze, and store your findings."""
