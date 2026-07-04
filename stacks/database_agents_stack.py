@@ -85,7 +85,7 @@ class DatabaseAgentsStack(Stack):
             # Port.tcp: Standard PostgreSQL connection port.
             ec2.Port.tcp(5432),
             # description: Explanation of the ingress rule's purpose.
-            "Allow PostgreSQL access from within VPC CIDR block"
+            "Allow PostgreSQL access from within VPC"
         )
 
         # Configure serverless capacity settings using environment variables.

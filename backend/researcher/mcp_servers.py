@@ -64,27 +64,43 @@ def create_playwright_mcp_server(timeout_seconds=120):
 
     # Compile the command line arguments list for launching Playwright MCP
     args = [
+        # --headless: Runs the browser in the background without opening a visual window (Graphical User Interface).
+        # This is mandatory for server environments like Lambda which have no screen/display output.
         "--headless",
+        # --isolated: Creates independent, clean browser profiles for each run. 
+        # Cookies, storage, and cache are not shared between sessions, avoiding cross-contamination.
         "--isolated",
-        "--no-sandbox",          # Disables Chrome's security sandboxing layer since Lambda is already isolated
+        # --no-sandbox: Disables Chrome's security sandboxing layer since Lambda is already isolated
+        "--no-sandbox",          
+        # --ignore-https-errors: Prevents chromium from crashing or getting stuck when encountering bad/expired SSL certs on sites.
         "--ignore-https-errors",
+        # --user-agent: Spoofs a standard Windows desktop browser agent to prevent bot-detection scripts from blocking scrapers.
         "--user-agent",
         PLAYWRIGHT_USER_AGENT,
+        # --executable-path: Point Playwright to the specific Chromium binary directory we scanned in the container.
         "--executable-path",
         chrome_path,
+        # --config: Tells Playwright MCP server to load memory-reduction configuration options from the temp JSON file.
         "--config",
         config_path,
     ]
 
     # Assemble parameter map for process creation
     params = {
+        # command: The command that spawns the Node-based Playwright MCP server process.
         "command": "playwright-mcp",
         "args": args,
+        # env: Inject environment variables into the Playwright MCP server process.
         "env": {
+            # DEBUG: Enables detailed logging. 
+            # - pw:api prints all actions taken via the Playwright API (clicks, input, navigations).
+            # - pw:browser* prints console log updates and network browser events.
             "DEBUG": "pw:api,pw:browser*",
         },
     }
 
     logger.info("Creating Playwright MCP server with Chrome path: %s", chrome_path)
     
+    # client_session_timeout_seconds: Closes the server and aborts the execution environment 
+    # if the agent goes completely idle (no new tool calls or instructions) for 120 seconds.
     return MCPServerStdio(params=params, client_session_timeout_seconds=timeout_seconds)
