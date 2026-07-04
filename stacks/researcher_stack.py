@@ -13,6 +13,8 @@ from aws_cdk import aws_lambda as _lambda
 from aws_cdk import aws_logs as logs
 from aws_cdk import aws_s3vectors as s3vectors
 from aws_cdk import aws_sagemaker as sagemaker
+from aws_cdk import aws_events as events
+from aws_cdk import aws_events_targets as targets
 from constructs import Construct
 
 
@@ -137,7 +139,7 @@ class ResearcherStack(Stack):
             # production_variants: A list of deployment variants running behind the endpoint.
             production_variants=[
                 sagemaker.CfnEndpointConfig.ProductionVariantProperty(
-                    # variant_name: Identifier for the variant group.
+                    # variant_name: uniquw identifier for this configuration.
                     variant_name="AllTraffic",
                     # model_name: The name of the SageMaker Model resource we registered above.
                     model_name=model.model_name,
@@ -297,7 +299,7 @@ class ResearcherStack(Stack):
             # role: Assigns the IAM execution role we built above.
             role=ingest_role,
             # timeout: Maximum execution time allowed before AWS cuts off the function (60 seconds).
-            timeout=Duration.seconds(60),
+            timeout=Duration.seconds(120),
             # memory_size: RAM allocation (512 MB). Scales CPU capacity proportionally.
             memory_size=512,
             # environment: Environment variables accessible inside python via `os.environ`.
@@ -391,7 +393,7 @@ class ResearcherStack(Stack):
             os.path.join(os.path.dirname(__file__), "..", "backend", "researcher")
         )
 
-        # researcher_lambda: Docker-based Lambda function resource.
+        # researcher_lambda: Docker-based Lambda function resource to skip 250 MB limit.
         # CDK will automatically trigger a local `docker build` using the Dockerfile in `researcher_code_dir`,
         # push the resulting image to an ECR repository, and deploy it to Lambda.
         self.researcher_lambda = _lambda.DockerImageFunction(
@@ -415,6 +417,8 @@ class ResearcherStack(Stack):
             environment={
                 # INGEST_LAMBDA_NAME: The physical name of the ingestion pipeline lambda function.
                 "INGEST_LAMBDA_NAME": ingest_lambda_name,
+                # AWS_LWA_PASS_THROUGH_PATH: Tells AWS Lambda Web Adapter to route non-HTTP events (like EventBridge cron) to the /research route.
+                "AWS_LWA_PASS_THROUGH_PATH": "/research",
                 # BEDROCK_REGION: The AWS region hosting Bedrock models.
                 "BEDROCK_REGION": bedrock_region,
                 # RESEARCHER_MODEL: The LLM model identifier string used by LiteLLM.
@@ -437,6 +441,31 @@ class ResearcherStack(Stack):
         self.function_url = self.researcher_lambda.add_function_url(
             # auth_type: 'NONE' means the endpoint is public and does not require AWS signature authentication.
             auth_type=_lambda.FunctionUrlAuthType.NONE
+        )
+
+        # ----------------------------------------------------
+        # 5a. Automated Scheduler Trigger (EventBridge)
+        # ----------------------------------------------------
+        # Trigger the Researcher Lambda everyday at 8:00 AM IST (2:30 AM UTC).
+        # EventBridge cron format: cron(Minutes Hours Day-of-month Month Day-of-week Year)
+        # In UTC, 8:00 AM IST is 2:30 AM. Note: IST does not observe Daylight Saving Time.
+        daily_research_rule = events.Rule(
+            self,
+            "DailyResearchRule",
+            rule_name="finai-daily-research-trigger",
+            schedule=events.Schedule.cron(
+                minute="30",
+                hour="2",
+                day="*",
+                month="*",
+                year="*"
+            ),
+            description="Triggers the researcher agent lambda daily at 8:00 AM IST (2:30 AM UTC)"
+        )
+
+        # Connect the Rule to our Researcher Lambda function
+        daily_research_rule.add_target(
+            targets.LambdaFunction(self.researcher_lambda)
         )
 
         # ----------------------------------------------------

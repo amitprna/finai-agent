@@ -15,11 +15,22 @@ from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 
-# Suppress verbose library logs to keep standard output cleaner
+# Suppress verbose library logs to keep standard output cleaner.
+# logging.basicConfig defines the general log settings for the entire application.
 logging.basicConfig(level=logging.INFO)
+
+# log.setLevel(logging.CRITICAL) suppresses log messages. In Python logging:
+# DEBUG < INFO < WARNING < ERROR < CRITICAL.
+# By setting LiteLLM to CRITICAL, we only show critical system failures and suppress 
+# all intermediate logging (like verbose HTTP request logs or API token details).
 logging.getLogger("LiteLLM").setLevel(logging.CRITICAL)
 logging.getLogger("openai").setLevel(logging.ERROR)
 logging.getLogger("agents").setLevel(logging.ERROR)
+
+# logging.getLogger(__name__) gets or creates a Logger object named after the current file.
+# If this file runs directly (e.g. `python server.py`), __name__ is "__main__". 
+# If it is imported, __name__ is "server". This scope ensures you can see exactly 
+# which module printed a log message in CloudWatch.
 logger = logging.getLogger(__name__)
 
 # Import configurations, local tools, and browser servers
@@ -44,8 +55,13 @@ if os.getenv("LANGFUSE_SECRET_KEY"):
 app = FastAPI(title="FinAI Researcher Service")
 
 
+# Pydantic's BaseModel is used by FastAPI to validate, deserialize, and document the API schema.
+# When a client makes a POST request, FastAPI parses the JSON body, verifies it matches this schema, 
+# and automatically converts it into a Python object.
 class ResearchRequest(BaseModel):
     """Pydantic model representing incoming research POST API requests."""
+    # Optional[str]: specifies the value must be a string or None.
+    # Field(None, ...): sets a default value of None and attaches metadata/description.
     topic: Optional[str] = Field(None, description="Optional investment topic or ticker to search for.")
 
 
