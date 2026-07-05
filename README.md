@@ -6,6 +6,7 @@ This guide is designed for absolute beginners to help configure, deploy, and tea
 
 ## 1. System Architecture
 
+### Researcher Stack Architecture
 The following diagram illustrates how the components of the FinAI Researcher Stack interact when the researcher service is invoked:
 
 ```mermaid
@@ -19,6 +20,45 @@ graph TD
     FastAPI -->|5. Save Document| IngestionLambda[Ingestion Lambda: finai-ingest]
     IngestionLambda -->|6. Get Embeddings| SageMaker[SageMaker Serverless Endpoint]
     IngestionLambda -->|7. Store Vectors| S3Vectors[S3 Vectors Bucket / Database]
+```
+
+### Database Agents Stack Architecture
+The following diagram illustrates the decoupled, multi-agent orchestrator setup inside the Database Agents Stack. Client jobs are sent asynchronously via an SQS queue, and the Planner (Orchestrator) invokes downstream containerized specialist Lambda functions querying an Aurora Serverless v2 PostgreSQL DB via the RDS Data API:
+
+```mermaid
+graph TD
+    Client[Client / Trigger] -->|Push Job Payload| SQS[SQS Queue: finai-analysis-jobs]
+    SQS -->|Trigger Lambda| Planner[Planner/Orchestrator Lambda: finai-planner]
+    Planner -->|1. Coordinate Runs| Tagger[Tagger Lambda: finai-tagger]
+    Planner -->|2. Coordinate Runs| Reporter[Reporter Lambda: finai-reporter]
+    Planner -->|3. Coordinate Runs| Charter[Charter Lambda: finai-charter]
+    Planner -->|4. Coordinate Runs| Retirement[Retirement Lambda: finai-retirement]
+    
+    subgraph Storage & DB Layer
+        DB[(Aurora Serverless v2 PostgreSQL: finai)]
+        Secrets[AWS Secrets Manager: finai-aurora-credentials]
+        S3[S3 Vectors Bucket]
+    end
+
+    subgraph External & AI Services
+        Bedrock[AWS Bedrock / LLMs]
+        SageMaker[SageMaker Embeddings Endpoint]
+    end
+
+    Planner -.->|RDS Data API| DB
+    Tagger -.->|RDS Data API| DB
+    Reporter -.->|RDS Data API| DB
+    Charter -.->|RDS Data API| DB
+    Retirement -.->|RDS Data API| DB
+
+    Planner -.->|Fetch Credentials| Secrets
+    Planner -->|Fetch Vectors| S3
+    Planner -->|Embed Text| SageMaker
+    
+    Planner -->|LLM Reasoning| Bedrock
+    Tagger -->|LLM Reasoning| Bedrock
+    Reporter -->|LLM Reasoning| Bedrock
+    Retirement -->|LLM Reasoning| Bedrock
 ```
 
 ---
@@ -204,7 +244,7 @@ You should see a JSON output showing your Account Number and IAM User ARN.
 
 ## 4. Project Directory Structure
 
-Here is the directory structure layout for the FinAI Researcher Stack files. This layout organizes the infrastructure configuration files and the code components inside `backend/` directories:
+Here is the directory structure layout for the project files. This layout organizes the infrastructure configuration files and the code components inside `backend/` directories:
 
 ```text
 finai/
@@ -214,18 +254,30 @@ finai/
 ├── app.py                # Main CDK application orchestrator
 ├── cdk.json              # Configuration file directing CDK how to run the app
 ├── stacks/
-│   └── researcher_stack.py # CDK file defining SageMaker, S3Vectors, and Lambda services
+│   ├── researcher_stack.py    # CDK stack defining SageMaker, S3Vectors, and Lambda services
+│   └── database_agents_stack.py # CDK stack defining Aurora Serverless, SQS, and specialist Lambdas
 └── backend/
+    ├── Dockerfile.lambda # Shared Dockerfile for packaging Lambda agents
     ├── ingest/
-    │   └── ingest_s3vectors.py # Python code containing Ingest Lambda functions
-    └── researcher/
-        ├── Dockerfile     # Docker instructions to assemble the researcher agent container
-        ├── .dockerignore  # Ignores files from Docker build context
-        ├── pyproject.toml # Dependencies required by the researcher agent in container
-        ├── server.py      # Entrypoint script for Researcher Lambda container execution
-        ├── tools.py       # Tool execution routines utilized by researcher
-        ├── mcp_servers.py # Model Context Protocol server configuration
-        └── context.py     # Custom context provider definitions
+    │   └── ingest_s3vectors.py # Python code containing Ingestion Lambda functions
+    ├── researcher/
+    │   ├── Dockerfile     # Docker instructions to assemble the researcher agent container
+    │   ├── .dockerignore  # Ignores files from Docker build context
+    │   ├── pyproject.toml # Dependencies required by the researcher agent in container
+    │   ├── server.py      # Entrypoint script for Researcher Lambda container execution
+    │   ├── tools.py       # Tool execution routines utilized by researcher
+    │   ├── mcp_servers.py # Model Context Protocol server configuration
+    │   └── context.py     # Custom context provider definitions
+    ├── database/
+    │   ├── pyproject.toml # Database connection utility package definition
+    │   ├── run_migrations.py # Schema setup script for Aurora Serverless DB
+    │   ├── seed_data.py   # Seed script to populate mock portfolios & profiles
+    │   └── src/           # Database module source code
+    ├── planner/           # Planner/Orchestrator agent code
+    ├── tagger/            # Tagger agent code
+    ├── reporter/          # Reporter agent code
+    ├── charter/           # Charter agent code
+    └── retirement/        # Retirement specialist agent code
 ```
 
 ---
@@ -250,7 +302,7 @@ cdk bootstrap aws://123456789012/us-east-1
 
 ---
 
-## 6. Deploying the Researcher Stack
+## 6. Deploying the Stacks
 
 With all tools installed, Docker active, and CLI configurations set, you are ready to deploy.
 
@@ -262,17 +314,26 @@ uv sync
 ```
 
 ### Step 2: Configure Environment Variables
-Create a file named `.env` in the root of the project (`finai/`) if it does not already exist, and customize configurations such as your AWS account details and Bedrock models:
+Create a file named `.env` in the root of the project (`finai/`) if it does not already exist, and customize configurations. Below are configurations for both stacks:
 
 ```env
 # AWS Account Settings
 AWS_ACCOUNT_ID=123456789012
 DEFAULT_AWS_REGION=us-east-1
 
+# Shared Vector & SageMaker settings
+VECTOR_BUCKET=finai-vectors-123456789012
+SAGEMAKER_ENDPOINT=finai-embedding-endpoint
+
 # Researcher Stack Configuration
 INGEST_LAMBDA_NAME=finai-ingest
 BEDROCK_REGION=us-east-1
 RESEARCHER_MODEL=bedrock/moonshotai.kimi-k2.5
+
+# Database Agents Stack Settings
+MIN_CAPACITY=0.5
+MAX_CAPACITY=2.0
+BEDROCK_MODEL_ID=moonshotai.kimi-k2.5
 
 # SageMaker Embedding Config
 EMBEDDING_MODEL_NAME=sentence-transformers/all-MiniLM-L6-v2
@@ -284,51 +345,87 @@ LANGFUSE_HOST=https://cloud.langfuse.com
 ```
 
 ### Step 3: Start Docker Daemon
-Make sure Docker Desktop is open and active on your machine (or that the Docker service is running on Linux). CDK requires the Docker daemon to build the docker image located at `backend/researcher/`.
+Make sure Docker Desktop is open and active on your machine (or that the Docker service is running on Linux). CDK requires the Docker daemon to build the docker images located in `backend/researcher/` and `backend/`.
 
 ### Step 4: Run the CDK Deploy Command
-To synthesize and deploy only the Researcher Stack, run:
+
+You can choose to deploy either stack individually or deploy all stacks at once.
+
+#### Option A: Deploy the Researcher Stack
 ```bash
 cdk deploy FinaiResearcherStack
 ```
 
-#### What this command does:
-1. Loads environment variables from `.env`.
-2. Synthesizes AWS CloudFormation templates based on `researcher_stack.py`.
-3. Spins up a local Docker container to build the image located in `backend/researcher/`.
-4. Pushes the built Docker image to an automatically generated Amazon ECR repository.
-5. Deploys the SageMaker model, serverless endpoint, S3 vector database bucket, indexes, and Lambdas.
-
-#### Successful Deployment Output:
-At the end of the deployment, CDK will output the generated resources, including the public endpoint URL:
-```text
-Outputs:
-FinaiResearcherStack.ResearcherFunctionUrl = https://xxxxxxxxxxxxxx.lambda-url.us-east-1.on.aws/
-FinaiResearcherStack.SageMakerEndpointName = finai-embedding-endpoint
-FinaiResearcherStack.VectorsBucketName = finai-vectors-123456789012
+#### Option B: Deploy the Database Agents Stack
+```bash
+cdk deploy FinaiDatabaseAgentsStack
 ```
 
-Use the `ResearcherFunctionUrl` outputted in the CLI to trigger your agent.
+#### Option C: Deploy All Stacks
+```bash
+cdk deploy --all
+```
+
+#### Successful Database Agents Stack Deployment Output:
+At the end of the deployment, CDK will output the generated resources, including the database endpoint and queue:
+```text
+Outputs:
+FinaiDatabaseAgentsStack.AuroraClusterArn = arn:aws:rds:us-east-1:123456789012:cluster:finai-aurora-cluster
+FinaiDatabaseAgentsStack.AuroraClusterEndpoint = finai-aurora-cluster.xxxxxx.us-east-1.rds.amazonaws.com
+FinaiDatabaseAgentsStack.AuroraSecretArn = arn:aws:secretsmanager:us-east-1:123456789012:secret:finai-aurora-credentials-xxxxxx
+FinaiDatabaseAgentsStack.SqsQueueUrl = https://sqs.us-east-1.amazonaws.com/123456789012/finai-analysis-jobs
+FinaiDatabaseAgentsStack.SqsQueueArn = arn:aws:sqs:us-east-1:123456789012:finai-analysis-jobs
+FinaiDatabaseAgentsStack.LambdaRoleArn = arn:aws:iam::123456789012:role/finai-lambda-agents-role
+```
 
 ---
 
-## 7. Destroying the Researcher Stack
+### Step 5: Database Migrations and Seeding
+After deploying the `FinaiDatabaseAgentsStack`, you must initialize the schema and populate the database with seed instruments.
 
-To avoid incurring charges on AWS for running services (such as SageMaker inference endpoints or S3 vector storage), destroy the stack once you are done using it.
+1. **Update your `.env` file** with the outputs from the stack:
+   ```env
+   AURORA_CLUSTER_ARN=arn:aws:rds:us-east-1:123456789012:cluster:finai-aurora-cluster
+   AURORA_SECRET_ARN=arn:aws:secretsmanager:us-east-1:123456789012:secret:finai-aurora-credentials-xxxxxx
+   AURORA_DATABASE=finai
+   ```
 
-Run the following command from the project root:
+2. **Run migrations** to set up the database tables:
+   ```bash
+   uv run python backend/database/run_migrations.py
+   ```
+
+3. **Seed the database** with initial portfolio profiles and instruments:
+   ```bash
+   uv run python backend/database/seed_data.py
+   ```
+
+---
+
+## 7. Destroying the Stacks
+
+To avoid incurring charges on AWS for running services (such as SageMaker inference endpoints, S3 vector storage, or Aurora PostgreSQL Serverless instances), destroy the stacks once you are done using them.
+
+#### Destroy the Researcher Stack:
 ```bash
 cdk destroy FinaiResearcherStack
 ```
 
-Confirm the tear-down by typing `y` and pressing Enter when prompted:
-```text
-Are you sure you want to delete: FinaiResearcherStack (y/n)? y
+#### Destroy the Database Agents Stack:
+```bash
+cdk destroy FinaiDatabaseAgentsStack
 ```
 
-This will safely remove:
-* The SageMaker Serverless Inference Endpoint & Model configuration.
-* The Ingestion Lambda and the Docker-based Researcher Lambda.
-* Function URLs and associated IAM Roles created specifically for the stack.
+#### Destroy All Stacks:
+```bash
+cdk destroy --all
+```
+
+Confirm the tear-down by typing `y` and pressing Enter when prompted:
+```text
+Are you sure you want to delete: FinaiDatabaseAgentsStack (y/n)? y
+```
+
+This will safely remove all resource provisionings including databases, Lambda functions, IAM roles, SQS queues, and configuration policies.
 
 *(Note: S3 buckets and log groups might be retained depending on your CDK stack removal policy settings).*

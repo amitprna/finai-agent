@@ -18,6 +18,7 @@ load_dotenv()
 
 # Import the stack definition construct
 from stacks.researcher_stack import ResearcherStack
+from stacks.database_agents_stack import DatabaseAgentsStack
 
 # ----------------------------------------------------
 # App Initialization & Environment Definition
@@ -40,6 +41,11 @@ env = cdk.Environment(account=aws_account, region=aws_region)
 # ResearcherStack: Deploys the Playwright agent container environment,
 # the serverless SageMaker embedding model, and the S3 vectors database index.
 ResearcherStack(app, "FinaiResearcherStack", env=env)
+
+# DatabaseAgentsStack: Deploys the database agents infrastructure including
+# Aurora Serverless v2 PostgreSQL, SQS queue, IAM permissions role, and Docker-based Lambda agents.
+DatabaseAgentsStack(app, "FinaiDatabaseAgentsStack", env=env)
+
 
 # app.synth: Synthesizes CloudFormation template configuration JSONs.
 # Converts our Python CDK classes into declarative templates ready for AWS deployment.
