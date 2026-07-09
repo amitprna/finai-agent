@@ -1,52 +1,62 @@
 #!/usr/bin/env python3
 """
-CDK Application Entrypoint Script
-Boots up the AWS CDK App context, configures target account and region settings,
-and instantiates the infrastructure stacks (e.g. ResearcherStack) for deployment.
+AWS CDK Entrypoint Application
+==============================
+This script acts as the entrypoint launcher for AWS CDK.
+It reads configuration variables from .env and instantiates the three 
+infrastructure stacks that make up the FinAI wealth advisor ecosystem.
 """
 
 import os
 import aws_cdk as cdk
 from dotenv import load_dotenv
 
-# ----------------------------------------------------
-# Environment Configuration Loading
-# ----------------------------------------------------
-# Load environment settings from local .env files if present.
-# This makes it easy to inject AWS account keys or custom region strings.
+# Load local environment configuration parameters from .env
 load_dotenv()
 
-# Import the stack definition construct
+# Import the three stacks defined in the stacks/ directory
 from stacks.researcher_stack import ResearcherStack
 from stacks.database_agents_stack import DatabaseAgentsStack
+from stacks.frontend_stack import FrontendStack
 
-# ----------------------------------------------------
-# App Initialization & Environment Definition
-# ----------------------------------------------------
-# cdk.App: The primary construct tree node for any AWS CDK application.
-# It acts as a root container for all stack objects deployed together.
+# Initialize the primary CDK App wrapper
 app = cdk.App()
 
-# Retrieve deployment targets from operating system environment variables
-aws_account = os.getenv("AWS_ACCOUNT_ID")
-aws_region = os.getenv("DEFAULT_AWS_REGION", "us-east-1")
+# ----------------------------------------------------
+# Target AWS Environment Configuration
+# ----------------------------------------------------
+# Retrieve targeted AWS account ID and region from environment configurations.
+# Fallback to CDK default environment variables if target keys are not explicitly set.
+aws_account = os.getenv("AWS_ACCOUNT_ID") or os.getenv("CDK_DEFAULT_ACCOUNT")
+aws_region = os.getenv("DEFAULT_AWS_REGION") or os.getenv("CDK_DEFAULT_REGION", "us-east-1")
 
-# cdk.Environment: Explicitly defines the AWS account ID and region target
-# where resources will be provisioned by CloudFormation.
+# Create a unified CDK environment parameter map
 env = cdk.Environment(account=aws_account, region=aws_region)
 
 # ----------------------------------------------------
-# Infrastructure Stack Instantiation
+# Infrastructure Stack Deployments
 # ----------------------------------------------------
-# ResearcherStack: Deploys the Playwright agent container environment,
-# the serverless SageMaker embedding model, and the S3 vectors database index.
-ResearcherStack(app, "FinaiResearcherStack", env=env)
 
-# DatabaseAgentsStack: Deploys the database agents infrastructure including
-# Aurora Serverless v2 PostgreSQL, SQS queue, IAM permissions role, and Docker-based Lambda agents.
-DatabaseAgentsStack(app, "FinaiDatabaseAgentsStack", env=env)
+# Stack 1: Semantic Researcher & Vector Ingestion
+# Provisions the Playwright scraping agent and the S3 semantic knowledge vector index.
+ResearcherStack(
+    app, "FinaiResearcherStack",
+    env=env
+)
 
+# Stack 2: Database & Multi-Agent Orchestration
+# Provisions the Aurora Serverless PostgreSQL cluster and the Docker-based agent lambdas.
+DatabaseAgentsStack(
+    app, "FinaiDatabaseAgentsStack",
+    env=env
+)
 
-# app.synth: Synthesizes CloudFormation template configuration JSONs.
-# Converts our Python CDK classes into declarative templates ready for AWS deployment.
+# Stack 3: Frontend Web Hosting & FastAPI Backend
+# Provisions Cognito authentication, Streamlit on Fargate, FastAPI Lambda, and CloudFront.
+FrontendStack(
+    app, "FinaiFrontendStack",
+    env=env
+)
+
+# Synthesize all cloudformation templates
 app.synth()

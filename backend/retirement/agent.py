@@ -103,6 +103,8 @@ def run_monte_carlo_simulation(
     bond_return_std = 0.05
     real_estate_return_mean = 0.08
     real_estate_return_std = 0.12
+    commodities_return_mean = 0.08
+    commodities_return_std = 0.12
 
     successful_scenarios = 0
     final_values = []
@@ -117,11 +119,13 @@ def run_monte_carlo_simulation(
             equity_return = random.gauss(equity_return_mean, equity_return_std)
             bond_return = random.gauss(bond_return_mean, bond_return_std)
             real_estate_return = random.gauss(real_estate_return_mean, real_estate_return_std)
+            commodities_return = random.gauss(commodities_return_mean, commodities_return_std)
 
             portfolio_return = (
                 asset_allocation["equity"] * equity_return
                 + asset_allocation["bonds"] * bond_return
                 + asset_allocation["real_estate"] * real_estate_return
+                + asset_allocation.get("commodities", 0.0) * commodities_return
                 + asset_allocation["cash"] * 0.02
             )
 
@@ -144,11 +148,13 @@ def run_monte_carlo_simulation(
             equity_return = random.gauss(equity_return_mean, equity_return_std)
             bond_return = random.gauss(bond_return_mean, bond_return_std)
             real_estate_return = random.gauss(real_estate_return_mean, real_estate_return_std)
+            commodities_return = random.gauss(commodities_return_mean, commodities_return_std)
 
             portfolio_return = (
                 asset_allocation["equity"] * equity_return
                 + asset_allocation["bonds"] * bond_return
                 + asset_allocation["real_estate"] * real_estate_return
+                + asset_allocation.get("commodities", 0.0) * commodities_return
                 + asset_allocation["cash"] * 0.02
             )
 
@@ -172,6 +178,7 @@ def run_monte_carlo_simulation(
         asset_allocation["equity"] * equity_return_mean
         + asset_allocation["bonds"] * bond_return_mean
         + asset_allocation["real_estate"] * real_estate_return_mean
+        + asset_allocation.get("commodities", 0.0) * commodities_return_mean
         + asset_allocation["cash"] * 0.02
     )
     expected_value_at_retirement = current_value
@@ -202,6 +209,7 @@ def generate_projections(
         asset_allocation["equity"] * 0.07
         + asset_allocation["bonds"] * 0.04
         + asset_allocation["real_estate"] * 0.06
+        + asset_allocation.get("commodities", 0.0) * 0.05
         + asset_allocation["cash"] * 0.02
     )
 

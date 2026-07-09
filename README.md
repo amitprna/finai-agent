@@ -1,431 +1,275 @@
-# FinAI Researcher Stack Deployment Guide
+# FinAI — Multi-Agent Wealth Management System (CDK Deployment)
+=============================================================
 
-This guide is designed for absolute beginners to help configure, deploy, and tear down the FinAI Researcher Stack from a completely fresh machine. Follow the steps sequentially to set up your environment, authenticate with AWS, and provision the serverless infrastructure.
+FinAI is a serverless, agentic wealth management application designed to analyze, tag, and project retirement readiness for Indian retail investor portfolios. It operates on a multi-agent framework to evaluate allocations (asset class, region, sector), update live stock prices, perform Monte Carlo retirement readiness simulations, and scrape the web for real-time market research (such as TCS financial data) to index semantic knowledge.
 
 ---
 
-## 1. System Architecture
+## 📈 Business Use Case
+Retail investors in India struggle to manage complex, diversified assets across multiple accounts (e.g., Demat stock accounts, EPF/PPF, NPS, mutual funds). Standard advisory portals either lack automated insight or are expensive. 
 
-### Researcher Stack Architecture
-The following diagram illustrates how the components of the FinAI Researcher Stack interact when the researcher service is invoked:
+FinAI solves this by providing:
+*   **Unified Account Aggregation**: Aggregates Demat accounts, EPF/PPF, and NPS balances.
+*   **Agentic Portfolio Orchestration**: A Planner agent coordinates a team of focused sub-agents (Reporter, Charter, Retirement) to evaluate diversification, identify gaps, and generate Monte Carlo retirement readiness curves.
+*   **Automatic Allocations Classifier**: An LLM-based Tagger automatically classifies new or untagged Indian symbols by sector, region, and asset class.
+*   **Semantic Market Research Database**: A scraper-agent crawls live financial sites (e.g. Yahoo Finance) using browser automation, summarizes trending news, and indexes vectorized context into an S3-based Vector Database to enrich subsequent investment recommendations.
+
+---
+
+## 🛠️ Technical Stack
+*   **Frontend**: Streamlit (Python-based interactive UI) packaged in a Docker container and deployed to **AWS ECS / Fargate** behind an Application Load Balancer.
+*   **Backend API**: FastAPI running serverless on **AWS Lambda** via Mangum and exposed through **AWS API Gateway (HTTP API)**.
+*   **Orchestration & Agents**: Built with standard python looping structures orchestrating focused agent lambdas via the `boto3` SDK.
+*   **LLM Model & Provider**: Amazon Bedrock invoking Moonshot Kimi (`moonshotai.kimi-k2.5`) for core analytical and formatting tasks.
+*   **Database**: PostgreSQL hosted on **AWS Aurora Serverless v2 PostgreSQL**, using AWS Secrets Manager for secure credential storage and accessed via the HTTP-based **RDS Data API**.
+*   **Vector Search Database**: Amazon **S3 Vectors Index** storing embeddings generated via **Amazon SageMaker Serverless Inference** (`sentence-transformers/all-MiniLM-L6-v2`).
+*   **Global Delivery & Routing**: **AWS CloudFront** serves as a unified HTTPS CDN routing frontend load-balancer traffic and `/api/*` REST API requests.
+*   **Observability**: **Langfuse** logs all LiteLLM calls, token usage, latency, and costs grouped by `job_id`.
+
+---
+
+## 🔍 System Architecture & Interactive Flows
+
+### 1. Unified Architecture Diagram
 
 ```mermaid
-graph TD
-    Client[Client / Trigger] -->|HTTP POST| LWA[AWS Lambda Web Adapter]
-    LWA -->|HTTP Proxy Port 8000| FastAPI[FastAPI App: server.py]
-    FastAPI -->|1. LLM Reasoning| Bedrock[AWS Bedrock / LLM]
-    FastAPI -->|2. Spawns Subprocess| PlaywrightMCP[Playwright MCP Node Server]
-    PlaywrightMCP -->|3. Navigates Web| Chromium[Headless Chromium Browser]
-    Chromium -->|4. Scrapes News| Web[CNBC / MarketWatch / Google Finance]
-    FastAPI -->|5. Save Document| IngestionLambda[Ingestion Lambda: finai-ingest]
-    IngestionLambda -->|6. Get Embeddings| SageMaker[SageMaker Serverless Endpoint]
-    IngestionLambda -->|7. Store Vectors| S3Vectors[S3 Vectors Bucket / Database]
-```
-
-### Database Agents Stack Architecture
-The following diagram illustrates the decoupled, multi-agent orchestrator setup inside the Database Agents Stack. Client jobs are sent asynchronously via an SQS queue, and the Planner (Orchestrator) invokes downstream containerized specialist Lambda functions querying an Aurora Serverless v2 PostgreSQL DB via the RDS Data API:
-
-```mermaid
-graph TD
-    Client[Client / Trigger] -->|Push Job Payload| SQS[SQS Queue: finai-analysis-jobs]
-    SQS -->|Trigger Lambda| Planner[Planner/Orchestrator Lambda: finai-planner]
-    Planner -->|1. Coordinate Runs| Tagger[Tagger Lambda: finai-tagger]
-    Planner -->|2. Coordinate Runs| Reporter[Reporter Lambda: finai-reporter]
-    Planner -->|3. Coordinate Runs| Charter[Charter Lambda: finai-charter]
-    Planner -->|4. Coordinate Runs| Retirement[Retirement Lambda: finai-retirement]
+flowchart TD
+    %% Styling and Palettes
+    classDef client fill:#3b82f6,stroke:#1d4ed8,stroke-width:2px,color:#fff;
+    classDef server fill:#8b5cf6,stroke:#6d28d9,stroke-width:2px,color:#fff;
+    classDef db fill:#06b6d4,stroke:#0891b2,stroke-width:2px,color:#fff;
+    classDef aws fill:#f97316,stroke:#ea580c,stroke-width:2px,color:#fff;
+    classDef tool fill:#10b981,stroke:#047857,stroke-width:2px,color:#fff;
     
-    subgraph Storage & DB Layer
-        DB[(Aurora Serverless v2 PostgreSQL: finai)]
-        Secrets[AWS Secrets Manager: finai-aurora-credentials]
-        S3[S3 Vectors Bucket]
+    %% LAYER 1: CLIENT FRONTEND
+    subgraph ClientLayer ["1. Client Access Layer"]
+        CF["AWS CloudFront CDN"]:::aws
+        ALB["Application Load Balancer (ALB)"]:::aws
+        Streamlit["Streamlit UI (ECS Fargate Container)"]:::client
     end
 
-    subgraph External & AI Services
-        Bedrock[AWS Bedrock / LLMs]
-        SageMaker[SageMaker Embeddings Endpoint]
+    %% LAYER 2: ROUTING & API
+    subgraph APILayer ["2. Routing & API Gateway Layer"]
+        FastAPI["FastAPI Backend Lambda (Mangum Adapter)"]:::server
+        SQS["AWS SQS Queue (finai-analysis-jobs)"]:::aws
     end
 
-    Planner -.->|RDS Data API| DB
-    Tagger -.->|RDS Data API| DB
-    Reporter -.->|RDS Data API| DB
-    Charter -.->|RDS Data API| DB
-    Retirement -.->|RDS Data API| DB
+    %% LAYER 3: AGENTS
+    subgraph AgentOrchestration ["3. Multi-Agent Orchestration Stack"]
+        LambdaPlanner["finai-planner Lambda (Orchestrator)"]:::server
+        LiteLLM["LiteLLM Integration"]:::tool
+        Bedrock["Amazon Bedrock (Kimi K2.5 LLM)"]:::aws
+        
+        subgraph SubAgents ["Sub-Agents"]
+            LambdaTagger["finai-tagger Lambda"]:::aws
+            LambdaReporter["finai-reporter Lambda"]:::aws
+            LambdaCharter["finai-charter Lambda"]:::aws
+            LambdaRetirement["finai-retirement Lambda"]:::aws
+        end
+    end
 
-    Planner -.->|Fetch Credentials| Secrets
-    Planner -->|Fetch Vectors| S3
-    Planner -->|Embed Text| SageMaker
+    %% LAYER 4: DATABASE & STORAGE
+    subgraph StorageLayer ["4. Persistent Storage Layer"]
+        Aurora["Aurora Serverless PostgreSQL (RDS Data API)"]:::db
+        SM_Creds["AWS Secrets Manager"]:::aws
+    end
+
+    %% LAYER 5: RESEARCH & INGESTION
+    subgraph ResearcherStack ["5. Web Scraping & Vector DB Stack"]
+        LambdaResearcher["finai-researcher Docker Lambda (LWA)"]:::server
+        Playwright["Playwright MCP Node Server (FastAPI Interface)"]:::tool
+        LambdaIngest["finai-ingest Lambda"]:::aws
+        SageMaker["SageMaker Serverless (all-MiniLM-L6-v2)"]:::aws
+        S3Vectors["Amazon S3 Vector Storage Index"]:::db
+    end
+
+    %% LAYER 6: TELEMETRY
+    subgraph ObservabilityLayer ["6. Observability Layer"]
+        Langfuse["Langfuse Telemetry Cloud"]:::tool
+    end
+
+    %% --- CONNECTIONS WITH STEP NUMBERS & PROPER SPACING ---
     
-    Planner -->|LLM Reasoning| Bedrock
-    Tagger -->|LLM Reasoning| Bedrock
-    Reporter -->|LLM Reasoning| Bedrock
-    Retirement -->|LLM Reasoning| Bedrock
+    %% FLOW A: USER ACCESS & DATABASE OPERATIONS
+    User((User Browser)) ==>|1. Access URL| CF
+    CF ==>|2. Default routing| ALB
+    ALB ==>|3. Forward WebSockets| Streamlit
+    Streamlit ==>|4. REST Calls to /api/*| CF
+    CF ==>|5. Route API path| FastAPI
+    FastAPI ==>|6. Retrieve Secret| SM_Creds
+    FastAPI ==>|7. RDS Data API| Aurora
+
+    %% FLOW B: ASYNCHRONOUS PORTFOLIO ANALYSIS ORCHESTRATION
+    Streamlit -->|8. Request analysis run| CF
+    FastAPI -->|9. Push execution job payload| SQS
+    SQS -->|10. Trigger execution| LambdaPlanner
+    
+    LambdaPlanner -->|11. Manage task workflow| Aurora
+    LambdaPlanner -->|12. Call model via LiteLLM| Bedrock
+    
+    LambdaPlanner -->|13a. Call symbol tagger| LambdaTagger
+    LambdaPlanner -->|13b. Call reporter| LambdaReporter
+    LambdaPlanner -->|13c. Call charter| LambdaCharter
+    LambdaPlanner -->|13d. Call retirement mc| LambdaRetirement
+    
+    SubAgents -->|14. Write agent evaluation results| Aurora
+
+    %% FLOW C: LIVE WEB RESEARCH & SEMANTIC INGESTION
+    Streamlit -.->|15. Trigger research query| LambdaResearcher
+    LambdaResearcher -->|16. Execute FastAPI route| Playwright
+    Playwright -->|17. Scrape Yahoo Finance data| LambdaResearcher
+    LambdaResearcher -->|18. Call Summarizer LLM| Bedrock
+    LambdaResearcher -->|19. Trigger ingestion payload| LambdaIngest
+    LambdaIngest -->|20. Fetch embeddings| SageMaker
+    LambdaIngest -->|21. Index vector & text metadata| S3Vectors
+
+    %% FLOW D: TELEMETRY & OBSERVABILITY TRACING
+    LiteLLM -.->|22. Send prompt/response telemetry| Langfuse
+    LambdaResearcher -.->|23. Trace researcher spans| Langfuse
+    LambdaPlanner -.->|24. Trace planner loops| Langfuse
 ```
+
+### 2. Detailed System Flows
+
+#### Flow A: UI Operations & Relational Storage
+1. The user opens the web application via the **AWS CloudFront** secure HTTPS domain.
+2. CloudFront routes standard web requests through the **Application Load Balancer (ALB)**, which upgrades connections to persistent WebSockets (with a 30-minute connection idle timeout to prevent disconnection drops) and routes requests to the **Streamlit UI** running containerized inside **AWS ECS / Fargate**.
+3. Streamlit uses standard REST calls to talk to the backend. These calls are directed to CloudFront, which routes `/api/*` requests directly to our serverless **FastAPI Backend Lambda** using a Mangum adapter.
+4. FastAPI pulls database connection parameters from **AWS Secrets Manager** and processes transaction requests against **AWS Aurora Serverless PostgreSQL** via the HTTP-based **RDS Data API**.
+5. When adding a position to a Demat stock account, FastAPI dynamically queries the current price, calculates `price * quantity`, and performs validation against the account's available cash balance to block the trade with an `HTTPException(400)` if funds are insufficient.
+
+#### Flow B: Asynchronous Agentic Portfolio Analysis
+1. When a user requests portfolio analysis, Streamlit sends a POST request to `/api/analyze`.
+2. The FastAPI backend creates a job record in PostgreSQL and pushes the job payload containing the unique `job_id` to the **AWS SQS Queue** (`finai-analysis-jobs`).
+3. SQS triggers the **`finai-planner` Lambda** orchestrator function.
+4. The `finai-planner` evaluates the user portfolio allocations and orchestrates analytical sub-agents by invoking focused AWS Lambda functions:
+   - **`finai-tagger`**: Resolves sector, regional exposure, and asset category for any untagged symbols.
+   - **`finai-reporter`**: Generates structured Markdown analyses.
+   - **`finai-charter`**: Assembles chart configurations.
+   - **`finai-retirement`**: Runs Monte Carlo models to map retirement readiness.
+5. All sub-agents write their evaluation artifacts back to PostgreSQL.
+
+#### Flow C: Browser Automation Scraping & Semantic Vector Ingestion
+1. The user requests live equity research (e.g. Yahoo Finance scraping) in the Streamlit UI, triggering a request to the **`finai-researcher` Lambda**.
+2. **FastAPI & Playwright Docker Setup**:
+   - The `finai-researcher` service is containerized inside a Docker image containing node.js and a globally installed **Playwright MCP (Model Context Protocol)** server alongside Chromium.
+   - It incorporates the **AWS Lambda Web Adapter (LWA)**, allowing standard Lambda invocations to proxy HTTP requests directly to a local Python `uvicorn` instance serving a FastAPI app (`server.py`).
+   - The FastAPI app executes browser commands, crawls Yahoo Finance using Playwright automation, extracts news or metrics, and processes a summary via Bedrock.
+3. The researcher sends the textual data to the **`finai-ingest` Lambda**.
+4. `finai-ingest` triggers an **Amazon SageMaker Serverless Inference** endpoint running `sentence-transformers/all-MiniLM-L6-v2` to obtain a 384-dimensional vector embedding.
+5. Ingest updates the vector index, storing the resulting semantic index and text details within **Amazon S3 Vector Storage**.
+
+#### Flow D: Telemetry & Tracing
+1. LiteLLM callback intercepts Bedrock LLM prompts/responses across all agents and routes telemetry to the **Langfuse US Cloud** dashboard.
+2. Because all sub-agents inherit the same `trace_id` (the parent `job_id`), Langfuse automatically groups all independent agent executions (Planner, Reporter, Charter, Retirement) into a single, unified execution trace tree.
 
 ---
 
-## 2. Prerequisites: Environment Setup
+## 🏗️ CDK Infrastructure Stacks Deep Dive
 
-Before building or deploying AWS infrastructure, you must install Python package management tools, Node.js, the AWS CLI, and Docker on your local computer.
+The architecture is divided into three distinct CloudFormation Stacks defined in the `stacks/` directory:
 
-### Step A: Install `uv` (Fast Python Package Manager)
-`uv` is an extremely fast Python package installer and resolver. Install it based on your operating system:
+### Stack 1: Database & Agent Orchestration (`DatabaseAgentsStack`)
+*   **CDK Logical Name**: `FinaiDatabaseAgentsStack`
+*   **Primary Responsibility**: Deploys the application's database backend and AI execution sub-agents.
+*   **Core Resources**:
+    *   **Aurora Serverless v2 Cluster**: Runs Postgres engine v16. Allows the database capacity to automatically scale down to 0.5 ACU during idle times and scale up to 2 ACUs when processing heavy queries.
+    *   **AWS Secrets Manager**: Automatically generates secure database credentials and database encryption keys.
+    *   **AWS SQS Queue (`finai-analysis-jobs`)**: decouples API requests from agent execution. API backend publishes to SQS, which invokes the Planner Lambda function.
+    *   **Docker-based sub-agents**: Planner, Tagger, Reporter, Charter, and Retirement are packaged as container images to support complex libraries without hitting Lambda's 250MB limit.
 
-* **Windows (PowerShell):** Open PowerShell and execute:
-  ```powershell
-  powershell -c "irm https://astral.sh/uv/install.ps1 | iex"
-  ```
-* **macOS (M-Series or Intel):** Open Terminal and execute:
-  ```bash
-  curl -LsSf https://astral.sh/uv/install.sh | sh
-  ```
-  Alternatively, if you use Homebrew:
-  ```bash
-  brew install uv
-  ```
-* **Linux / Ubuntu:** Open Terminal and execute:
-  ```bash
-  curl -LsSf https://astral.sh/uv/install.sh | sh
-  ```
+### Stack 2: Web Scraping & Semantic Search (`ResearcherStack`)
+*   **CDK Logical Name**: `FinaiResearcherStack`
+*   **Primary Responsibility**: Collects equity news data and maintains vectorized knowledge context.
+*   **Core Resources**:
+    *   **Playwright Docker Lambda (`finai-researcher`)**: Uses Node/Chromium inside Lambda with Lambda Web Adapter (LWA) to crawl pages, summarize findings using Bedrock, and write news context.
+    *   **SageMaker Serverless Inference Endpoint**: Hosts `sentence-transformers/all-MiniLM-L6-v2` to convert text queries into 384-dimensional embeddings.
+    *   **S3 Vector Database Bucket**: Stores embeddings index context files directly on S3 to create a low-cost, serverless vector retrieval network.
+    *   **EventBridge Rule**: Runs on a daily cron schedule to trigger Yahoo news scraping automatically.
 
-> [!NOTE]
-> Restart your terminal window after installation to ensure the `uv` command is recognized in your path.
+### Stack 3: Frontend Hosting & API Routing (`FrontendStack`)
+*   **CDK Logical Name**: `FinaiFrontendStack`
+*   **Primary Responsibility**: Handles user logins, serves the Streamlit UI dashboard, and exposes the HTTP API.
+*   **Core Resources**:
+    *   **Cognito User Pool**: Houses user directory credentials. Utilizes a PreSignUp trigger Lambda to auto-confirm user emails.
+    *   **ECS Fargate Service**: Hosts the Streamlit frontend container behind an Application Load Balancer (ALB). Features a 30-minute WebSocket connection timeout.
+    *   **FastAPI API Lambda (`finai-api`)**: Serves the REST API using a Mangum wrapper.
+    *   **AWS API Gateway**: Exposes API endpoints under a serverless gateway configuration.
+    *   **CloudFront CDN Distribution**: Serves as a single domain fronting both frontend Streamlit and backend API endpoints, eliminating CORS issues entirely.
 
 ---
 
-### Step B: Install Node.js & AWS CDK CLI
-The AWS Cloud Development Kit (CDK) CLI is run via Node.js.
+## 🚀 Step-by-Step Production Deployment Guide
 
-* **Windows:**
-  1. Download the LTS Installer from the official [Node.js Website](https://nodejs.org/).
-  2. Run the downloaded `.msi` file and follow the setup wizard (make sure to check the box to automatically install necessary tools).
-  * Alternatively, using winget:
-    ```powershell
-    winget install OpenJS.NodeJS
-    ```
-* **macOS (M-Series / Intel):**
-  * Using Homebrew:
+### Prerequisites
+1.  **AWS Account**: An AWS account with the AWS CLI configured (`aws configure`).
+2.  **NodeJS & CDK**: Ensure Node.js is installed to run CDK commands.
+3.  **Docker**: Required to compile ECR container assets for the Researcher and Streamlit frontend.
+4.  **UV Python Manager**: `uv` is used for packaging backend lambda zip files and running local scripts.
+
+---
+
+### Step 1: Package the FastAPI Lambda Code
+Compile the FastAPI dependencies and sources into the Lambda-ready deployment package:
+```bash
+python scripts/build_api_zip.py
+```
+*   This automatically downloads and bundles the Linux x86_64 native wheels (`pydantic-core`, `cryptography`) into `backend/api/api_lambda.zip`.
+
+---
+
+### Step 2: Bootstrap & Deploy the CloudFormation Stacks (Option A - Separately)
+To understand resource dependencies and trace the deployment of each architectural layer step-by-step, deploy the stacks one-by-one in this order:
+
+1.  **Deploy SageMaker embeddings and Web scraping tools first**:
     ```bash
-    brew install node
+    npx cdk deploy FinaiResearcherStack --require-approval never
     ```
-  * Or download the macOS Installer (`.pkg`) from the official Node.js Website.
-* **Linux / Ubuntu:** Run the following commands in your terminal:
-  ```bash
-  # Install NodeSource LTS Node.js repository
-  curl -fsSL https://deb.nodesource.com/setup_lts.x | sudo -E bash -
-  # Install nodejs
-  sudo apt-get install -y nodejs
-  ```
+2.  **Deploy Database and Agent compute resources second**:
+    ```bash
+    npx cdk deploy FinaiDatabaseAgentsStack --require-approval never
+    ```
+3.  **Deploy the frontend user portal and API Gateway routing last**:
+    ```bash
+    npx cdk deploy FinaiFrontendStack --require-approval never
+    ```
 
-#### Install AWS CDK Globally:
-Once Node.js and its package manager `npm` are installed, open a fresh terminal window and install the CDK command-line utility globally:
-```bash
-npm install -g aws-cdk
-```
+---
 
-Verify the installation:
+
+> [!TIP]
+> **Deploy All Stacks at Once (Single Command Deployment)**
+> If you want to deploy all stacks simultaneously in a single command, bootstrap your AWS environment (if not already done) and execute:
+> ```bash
+> # Bootstrap CDK (only required on a new AWS account/region)
+> npx cdk bootstrap
+> 
+> # Deploy all stacks concurrently
+> npx cdk deploy --all --require-approval never
+> ```
+
+
+---
+
+### Step 3: Run Database Migrations
+Create tables, triggers, indices, and database helper functions in the Aurora Serverless PostgreSQL cluster:
 ```bash
-cdk --version
+# Verify your local .env contains output ARNs for Aurora Cluster & Secrets manager
+uv run backend/database/run_migrations.py
 ```
 
 ---
 
-### Step C: Install Docker
-Docker is required to build the Docker image for the Researcher Lambda locally before pushing it to AWS Elastic Container Registry (ECR).
-
-* **Windows:**
-  1. Download and run the installer for [Docker Desktop for Windows](https://www.docker.com/products/docker-desktop/).
-  2. During installation, select **Use WSL 2 instead of Hyper-V** (highly recommended).
-  3. Ensure you have WSL 2 enabled by running `wsl --install` in PowerShell.
-  4. Start Docker Desktop and keep it running in the background.
-* **macOS (M-Series users):**
-  1. Download [Docker Desktop for Mac with Apple Silicon](https://www.docker.com/products/docker-desktop/).
-  2. Drag the Docker application into your Applications folder and launch it.
-* **macOS (Intel users):**
-  1. Download [Docker Desktop for Mac with Intel chip](https://www.docker.com/products/docker-desktop/).
-  2. Drag the application and launch it.
-* **Linux / Ubuntu:** Run the following commands to install Docker Engine:
-  ```bash
-  sudo apt-get update
-  sudo apt-get install -y ca-certificates curl gnupg
-  sudo install -m 0755 -d /etc/apt/keyrings
-  curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg
-  sudo chmod a+r /etc/apt/keyrings/docker.gpg
-
-  echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo "$VERSION_CODENAME") stable" | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
-
-  sudo apt-get update
-  sudo apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
-
-  # Configure Docker daemon to run without sudo
-  sudo usermod -aG docker $USER
-  ```
-  Log out and log back in to apply group changes, and verify with `docker ps`.
-
----
-
-## 3. AWS CLI & Credentials Setup
-
-You need the AWS command-line interface installed and configured with credentials that have administrator permissions to provision AWS resources.
-
-### Step A: Install AWS CLI
-* **Windows:** Open PowerShell and run the installer:
-  ```powershell
-  msiexec.exe /i https://awscli.amazonaws.com/AWSCLIV2.msi
-  ```
-  Or use winget:
-  ```powershell
-  winget install Amazon.AWSCLI
-  ```
-* **macOS:** Open Terminal and run:
-  ```bash
-  curl "https://awscli.amazonaws.com/AWSCLIV2.pkg" -o "AWSCLIV2.pkg"
-  sudo installer -pkg AWSCLIV2.pkg -target /
-  ```
-* **Linux / Ubuntu:** Run:
-  ```bash
-  curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
-  unzip awscliv2.zip
-  sudo ./aws/install
-  ```
-
-Verify:
+### Step 4: Seed Initial Allocations Data
+Populate the PostgreSQL instance with allocation mappings (sector, region, asset class) for default Indian tickers:
 ```bash
-aws --version
+uv run backend/database/seed_data.py
 ```
 
 ---
 
-### Step B: Create AWS IAM Administrator Credentials
-1. Log in to the [AWS Management Console](https://aws.amazon.com/console/) using your credentials.
-2. Search for and navigate to the **IAM** (Identity and Access Management) console.
-3. In the left navigation pane, choose **Users**, then click **Create user**.
-4. Configure user details:
-   * **User name:** `finai-cdk-deployer` (or any descriptive name).
-   * Click **Next**.
-5. Set permissions:
-   * Select **Attach policies directly**.
-   * In the search bar, search for **AdministratorAccess**.
-   * Check the box next to **AdministratorAccess**.
-   * Click **Next** and then **Create user**.
-6. Generate Access Keys:
-   * Find and click on your newly created user (`finai-cdk-deployer`) in the list.
-   * Click the **Security credentials** tab.
-   * Scroll down to the **Access keys** section and click **Create access key**.
-   * Select **Command Line Interface (CLI)** as the use case.
-   * Check the checkbox acknowledging the recommendation and click **Next**.
-   * (Optional) Add a tag name, then click **Create access key**.
-   
-> [!IMPORTANT]
-> Copy the **Access Key ID** and **Secret Access Key** or click **Download .csv file**. You will not be able to retrieve the Secret Access Key again once you navigate away from this screen.
-
----
-
-### Step C: Configure AWS CLI
-In your terminal or command prompt, run:
-```bash
-aws configure
-```
-
-You will be prompted for four pieces of information:
-```text
-AWS Access Key ID [None]: <Paste your Access Key ID>
-AWS Secret Access Key [None]: <Paste your Secret Access Key>
-Default region name [None]: us-east-1
-Default output format [None]: json
-```
-
-Verify your setup runs properly by requesting account details:
-```bash
-aws sts get-caller-identity
-```
-You should see a JSON output showing your Account Number and IAM User ARN.
-
----
-
-## 4. Project Directory Structure
-
-Here is the directory structure layout for the project files. This layout organizes the infrastructure configuration files and the code components inside `backend/` directories:
-
-```text
-finai/
-├── .env                  # Local environment file containing configuration variables
-├── pyproject.toml        # Main Python project configuration and package requirements
-├── uv.lock               # Dependency lockfile generated by uv
-├── app.py                # Main CDK application orchestrator
-├── cdk.json              # Configuration file directing CDK how to run the app
-├── stacks/
-│   ├── researcher_stack.py    # CDK stack defining SageMaker, S3Vectors, and Lambda services
-│   └── database_agents_stack.py # CDK stack defining Aurora Serverless, SQS, and specialist Lambdas
-└── backend/
-    ├── Dockerfile.lambda # Shared Dockerfile for packaging Lambda agents
-    ├── ingest/
-    │   └── ingest_s3vectors.py # Python code containing Ingestion Lambda functions
-    ├── researcher/
-    │   ├── Dockerfile     # Docker instructions to assemble the researcher agent container
-    │   ├── .dockerignore  # Ignores files from Docker build context
-    │   ├── pyproject.toml # Dependencies required by the researcher agent in container
-    │   ├── server.py      # Entrypoint script for Researcher Lambda container execution
-    │   ├── tools.py       # Tool execution routines utilized by researcher
-    │   ├── mcp_servers.py # Model Context Protocol server configuration
-    │   └── context.py     # Custom context provider definitions
-    ├── database/
-    │   ├── pyproject.toml # Database connection utility package definition
-    │   ├── run_migrations.py # Schema setup script for Aurora Serverless DB
-    │   ├── seed_data.py   # Seed script to populate mock portfolios & profiles
-    │   └── src/           # Database module source code
-    ├── planner/           # Planner/Orchestrator agent code
-    ├── tagger/            # Tagger agent code
-    ├── reporter/          # Reporter agent code
-    ├── charter/           # Charter agent code
-    └── retirement/        # Retirement specialist agent code
-```
-
----
-
-## 5. Bootstrapping AWS CDK
-
-Before you can deploy any CDK applications to your AWS account, you must bootstrap your environment. This creates resources (like an S3 bucket for assets, and IAM roles) that CDK uses during execution.
-
-1. Retrieve your AWS Account ID:
-   ```bash
-   aws sts get-caller-identity --query Account --output text
-   ```
-2. Bootstrap CDK (replace `<ACCOUNT-ID>` with your account number, and `<REGION>` with your chosen region, e.g., `us-east-1`):
-   ```bash
-   cdk bootstrap aws://<ACCOUNT-ID>/<REGION>
-   ```
-
-Example command execution:
-```bash
-cdk bootstrap aws://123456789012/us-east-1
-```
-
----
-
-## 6. Deploying the Stacks
-
-With all tools installed, Docker active, and CLI configurations set, you are ready to deploy.
-
-### Step 1: Initialize Python Virtual Environment & Install Dependencies
-From the root directory (`finai/`), set up your python workspace using `uv`:
-```bash
-# Sync workspace environment dependencies using uv
-uv sync
-```
-
-### Step 2: Configure Environment Variables
-Create a file named `.env` in the root of the project (`finai/`) if it does not already exist, and customize configurations. Below are configurations for both stacks:
-
-```env
-# AWS Account Settings
-AWS_ACCOUNT_ID=123456789012
-DEFAULT_AWS_REGION=us-east-1
-
-# Shared Vector & SageMaker settings
-VECTOR_BUCKET=finai-vectors-123456789012
-SAGEMAKER_ENDPOINT=finai-embedding-endpoint
-
-# Researcher Stack Configuration
-INGEST_LAMBDA_NAME=finai-ingest
-BEDROCK_REGION=us-east-1
-RESEARCHER_MODEL=bedrock/moonshotai.kimi-k2.5
-
-# Database Agents Stack Settings
-MIN_CAPACITY=0.5
-MAX_CAPACITY=2.0
-BEDROCK_MODEL_ID=moonshotai.kimi-k2.5
-
-# SageMaker Embedding Config
-EMBEDDING_MODEL_NAME=sentence-transformers/all-MiniLM-L6-v2
-
-# Langfuse Observability Config (Optional)
-LANGFUSE_PUBLIC_KEY=pk-lf-xxxx...
-LANGFUSE_SECRET_KEY=sk-lf-xxxx...
-LANGFUSE_HOST=https://cloud.langfuse.com
-```
-
-### Step 3: Start Docker Daemon
-Make sure Docker Desktop is open and active on your machine (or that the Docker service is running on Linux). CDK requires the Docker daemon to build the docker images located in `backend/researcher/` and `backend/`.
-
-### Step 4: Run the CDK Deploy Command
-
-You can choose to deploy either stack individually or deploy all stacks at once.
-
-#### Option A: Deploy the Researcher Stack
-```bash
-cdk deploy FinaiResearcherStack
-```
-
-#### Option B: Deploy the Database Agents Stack
-```bash
-cdk deploy FinaiDatabaseAgentsStack
-```
-
-#### Option C: Deploy All Stacks
-```bash
-cdk deploy --all
-```
-
-#### Successful Database Agents Stack Deployment Output:
-At the end of the deployment, CDK will output the generated resources, including the database endpoint and queue:
-```text
-Outputs:
-FinaiDatabaseAgentsStack.AuroraClusterArn = arn:aws:rds:us-east-1:123456789012:cluster:finai-aurora-cluster
-FinaiDatabaseAgentsStack.AuroraClusterEndpoint = finai-aurora-cluster.xxxxxx.us-east-1.rds.amazonaws.com
-FinaiDatabaseAgentsStack.AuroraSecretArn = arn:aws:secretsmanager:us-east-1:123456789012:secret:finai-aurora-credentials-xxxxxx
-FinaiDatabaseAgentsStack.SqsQueueUrl = https://sqs.us-east-1.amazonaws.com/123456789012/finai-analysis-jobs
-FinaiDatabaseAgentsStack.SqsQueueArn = arn:aws:sqs:us-east-1:123456789012:finai-analysis-jobs
-FinaiDatabaseAgentsStack.LambdaRoleArn = arn:aws:iam::123456789012:role/finai-lambda-agents-role
-```
-
----
-
-### Step 5: Database Migrations and Seeding
-After deploying the `FinaiDatabaseAgentsStack`, you must initialize the schema and populate the database with seed instruments.
-
-1. **Update your `.env` file** with the outputs from the stack:
-   ```env
-   AURORA_CLUSTER_ARN=arn:aws:rds:us-east-1:123456789012:cluster:finai-aurora-cluster
-   AURORA_SECRET_ARN=arn:aws:secretsmanager:us-east-1:123456789012:secret:finai-aurora-credentials-xxxxxx
-   AURORA_DATABASE=finai
-   ```
-
-2. **Run migrations** to set up the database tables:
-   ```bash
-   uv run python backend/database/run_migrations.py
-   ```
-
-3. **Seed the database** with initial portfolio profiles and instruments:
-   ```bash
-   uv run python backend/database/seed_data.py
-   ```
-
----
-
-## 7. Destroying the Stacks
-
-To avoid incurring charges on AWS for running services (such as SageMaker inference endpoints, S3 vector storage, or Aurora PostgreSQL Serverless instances), destroy the stacks once you are done using them.
-
-#### Destroy the Researcher Stack:
-```bash
-cdk destroy FinaiResearcherStack
-```
-
-#### Destroy the Database Agents Stack:
-```bash
-cdk destroy FinaiDatabaseAgentsStack
-```
-
-#### Destroy All Stacks:
-```bash
-cdk destroy --all
-```
-
-Confirm the tear-down by typing `y` and pressing Enter when prompted:
-```text
-Are you sure you want to delete: FinaiDatabaseAgentsStack (y/n)? y
-```
-
-This will safely remove all resource provisionings including databases, Lambda functions, IAM roles, SQS queues, and configuration policies.
-
-*(Note: S3 buckets and log groups might be retained depending on your CDK stack removal policy settings).*
+### Step 5: Validate and Launch
+Open the outputted **`CloudFrontUrl`** in your browser. All frontend traffic and `/api/*` requests are securely mapped under this domain.
+1.  Sign up/Log in via the Cognito authentication prompt.
+2.  Add a Demat portfolio account and input equity symbols (e.g., `TCS.NS`, `NIFTYBEES.NS`).
+3.  Click **Run AI Analysis** to start the multi-agent execution pipeline. Traces are automatically grouped by `job_id` and logged to your Langfuse dashboard.
