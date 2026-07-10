@@ -199,6 +199,60 @@ The architecture is divided into three distinct CloudFormation Stacks defined in
 
 ---
 
+## ⚙️ Environment Variables Configuration
+
+The application reads configuration parameters from a `.env` file located in the `finai-agent` directory. Below is a detailed reference of the required and optional environment variables:
+
+| Variable | Description | Default / Example |
+| :--- | :--- | :--- |
+| **AWS Settings** | | |
+| `AWS_ACCOUNT_ID` | Your AWS Account ID. | `905418342208` |
+| `DEFAULT_AWS_REGION` | The default target AWS region for CDK deployment and AWS resource invocation. | `us-east-1` |
+| **LLM & Bedrock** | | |
+| `BEDROCK_MODEL_ID` | The Bedrock foundational LLM model identifier used for analysis tasks. | `moonshotai.kimi-k2.5` |
+| `BEDROCK_REGION` | The AWS region where Bedrock models are hosted. | `us-west-2` |
+| **Researcher Stack** | | |
+| `INGEST_LAMBDA_NAME` | The physical name of the vector ingest AWS Lambda function. | `finai-ingest` |
+| `RESEARCHER_MODEL` | The LiteLLM model identifier used by the scraping researcher agent. | `bedrock/moonshotai.kimi-k2.5` |
+| `EMBEDDING_MODEL_NAME` | The pre-trained sentence transformer model used for vector embeddings. | `sentence-transformers/all-MiniLM-L6-v2` |
+| **Observability** | | |
+| `LANGFUSE_PUBLIC_KEY` | Public API key for Langfuse LLM monitoring and tracing. | `pk-lf-...` |
+| `LANGFUSE_SECRET_KEY` | Secret API key for Langfuse LLM monitoring and tracing. | `sk-lf-...` |
+| `LANGFUSE_HOST` | The URL of your Langfuse endpoint (US Cloud or EU Cloud). | `https://us.cloud.langfuse.com` |
+| **Database & SQS** | | |
+| `AURORA_CLUSTER_ARN` | The ARN of the Aurora Serverless DB cluster (required for migrations and local scripts). | *Derived after Stack 1* |
+| `AURORA_SECRET_ARN` | The Secrets Manager Secret ARN holding DB credentials. | *Derived after Stack 1* |
+| `AURORA_DATABASE` | PostgreSQL database name. | `finai` |
+| `SQS_QUEUE_URL` | SQS queue endpoint URL for async task queuing. | *Derived after Stack 1 (Prod)* |
+| **Local Dev Flags** | | |
+| `MOCK_AUTH` | Skip AWS Cognito JWT token validation (for testing/developing endpoints locally). | `true` / `false` |
+| `MOCK_LAMBDAS` | Execute agent workflows (Reporter, Charter, Retirement) locally inside the Python process instead of invoking AWS Lambdas. | `true` / `false` |
+
+---
+
+## 💻 Local Development & Testing Guide
+
+To facilitate developer productivity and test code changes without repeatedly deploying resources to AWS, FinAI provides mock and local execution modes.
+
+### 1. Enable Mock Authentication (`MOCK_AUTH=true`)
+By setting `MOCK_AUTH=true` in your `.env` file, the FastAPI server skips remote Cognito signature checks. It will accept any mock bearer token (e.g. `Bearer test_user_001`) and map request headers to a placeholder user profile in the database, allowing you to debug APIs instantly.
+
+### 2. Enable Local Agent Execution (`MOCK_LAMBDAS=true`)
+When `MOCK_LAMBDAS=true` is set:
+- The Planner orchestrator imports and runs sub-agent handlers (Reporter, Charter, Retirement) directly within the same local process instead of invoking deployed AWS Lambda functions.
+- To execute the API and agent loops on your local machine:
+  1. Boot the FastAPI server locally:
+     ```bash
+     python backend/api/main.py
+     ```
+  2. Launch the Streamlit frontend locally:
+     ```bash
+     streamlit run frontend/app.py
+     ```
+  This creates a completely self-contained local feedback loop!
+
+---
+
 ## 🚀 Step-by-Step Production Deployment Guide
 
 ### Prerequisites
