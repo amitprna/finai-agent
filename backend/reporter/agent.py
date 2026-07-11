@@ -4,6 +4,8 @@ Defines formatting models and structures required to prompt the Report Writer.
 """
 
 import os
+import json
+import boto3
 import logging
 from typing import Dict, Any, List
 from dataclasses import dataclass
@@ -78,16 +80,68 @@ def format_portfolio(portfolio: Dict[str, Any]) -> str:
 
 async def get_market_insights(symbols: List[str]) -> str:
     """
-    Stub method representing semantic query expansion.
-    In local execution environments, returns a simple fallback message.
-    
-    In a fully featured implementation, this tool could perform search queries (e.g., via Google Search
-    or a vector database) to fetch recent news, analyst ratings, and earnings transcripts for the symbols.
+    Query the S3 Vectors index using the SageMaker endpoint and custom s3vectors client
+    to retrieve relevant indexed research reports for the requested symbols.
     """
-    if symbols:
-        return (f"Live market research for {', '.join(symbols[:5])} is not configured in this local environment. "
-                "Please proceed with the portfolio data you have.")
-    return "No symbols provided for market research."
+    if not symbols:
+        return "No symbols provided for market research."
+
+    # Fetch variables from environment
+    region = os.getenv("DEFAULT_AWS_REGION", "us-east-1")
+    sagemaker_endpoint = os.getenv("SAGEMAKER_ENDPOINT", "finai-embedding-endpoint")
+    vector_bucket = os.getenv("VECTOR_BUCKET")
+
+    if not vector_bucket:
+        logger.warning("get_market_insights: VECTOR_BUCKET env var is not set. Falling back.")
+        return f"Live market research is not configured. Portfolio details should be used directly."
+
+    query_text = f"Financial details, news, and market analysis for {' '.join(symbols)}"
+
+    try:
+        # 1. Invoke SageMaker Serverless Endpoint to get embeddings
+        sagemaker_client = boto3.client("sagemaker-runtime", region_name=region)
+        sm_response = sagemaker_client.invoke_endpoint(
+            EndpointName=sagemaker_endpoint,
+            ContentType="application/json",
+            Body=json.dumps({"inputs": query_text}),
+        )
+        sm_result = json.loads(sm_response["Body"].read().decode())
+        
+        # HuggingFace sentence-transformers return nested array formats depending on task shape
+        query_embedding = sm_result[0] if isinstance(sm_result[0], list) else sm_result
+        if isinstance(query_embedding[0], list):
+            query_embedding = query_embedding[0]
+
+        # 2. Run semantic search against the index to retrieve the ingested analysis
+        s3vectors_client = boto3.client("s3vectors", region_name=region)
+        search_response = s3vectors_client.query_vectors(
+            vectorBucketName=vector_bucket,
+            indexName="financial-research",
+            queryVector={"float32": query_embedding},
+            topK=3,
+            returnDistance=True,
+            returnMetadata=True,
+        )
+
+        vectors = search_response.get("vectors", [])
+        if not vectors:
+            return f"No indexed research reports or news updates found in database for symbols: {', '.join(symbols)}"
+
+        insights = []
+        for i, vec in enumerate(vectors, 1):
+            metadata = vec.get("metadata", {})
+            doc_text = metadata.get("text", "")
+            source = metadata.get("source", "Unknown Source")
+            timestamp = metadata.get("timestamp", "")
+            insights.append(
+                f"Document {i} [Source: {source}, Date: {timestamp}]:\n{doc_text}\n"
+            )
+
+        return "\n---\n".join(insights)
+
+    except Exception as e:
+        logger.error(f"get_market_insights: Failed to retrieve semantic research context: {e}", exc_info=True)
+        return f"Market research lookups failed: {e}. Please complete the report using the portfolio data."
 
 
 def create_agent(job_id: str, portfolio: Dict[str, Any], db=None):

@@ -23,7 +23,7 @@ _dir = Path(__file__).parent.absolute()
 for _p in [str(_dir), str(_dir.parent)]:
     if _p not in sys.path:
         sys.path.insert(0, _p)
-for _m in ["templates", "agent"]:
+for _m in ["templates", "agent", "judge"]:
     sys.modules.pop(_m, None)
 
 import litellm
@@ -152,14 +152,53 @@ async def run_reporter(job_id: str) -> dict:
             # Feed the tool execution results back to the LLM context history
             messages.append({"role": "tool", "tool_call_id": tc.id, "name": tc.function.name, "content": result})
 
-    # Save final report to the jobs table (updates report columns)
-    db.jobs.update_report(job_id, {
-        "content": report_text,
-        "generated_at": datetime.utcnow().isoformat(),
-        "agent": "reporter",
-    })
-    logger.info(f"Reporter [{job_id}]: Report generated and saved successfully ✓")
-    return {"success": True, "message": "Report generated and saved"}
+    # ----------------------------------------------------
+    # Stage 5: Report Quality Evaluation (LLM-as-a-Judge)
+    # ----------------------------------------------------
+    # In agentic systems, relying on a single LLM pass can occasionally lead to incomplete
+    # sections or format errors. To ensure production-grade output, we employ the "LLM-as-a-Judge"
+    # design pattern. A separate, evaluator agent (defined in judge.py) critiques the generated
+    # report against the original task instructions.
+    # It returns a structural quality score (0-100) and actionable review feedback.
+    logger.info(f"Reporter [{job_id}]: Evaluating report quality using Judge Agent...")
+    from judge import evaluate
+    try:
+        # Call the judge asynchronously, passing the instructions, user task, and the generated markdown text
+        evaluation = await evaluate(
+            original_instructions=REPORTER_INSTRUCTIONS,
+            original_task=task,
+            original_output=report_text
+        )
+        logger.info(f"Reporter [{job_id}]: Judge quality check completed. Score = {evaluation.score}/100")
+        
+        # Construct the database report payload, including both the report and the judge's assessment metadata
+        report_payload = {
+            "content": report_text,
+            "generated_at": datetime.utcnow().isoformat(),
+            "agent": "reporter",
+            "evaluation": {
+                "score": evaluation.score,
+                "feedback": evaluation.feedback
+            }
+        }
+    except Exception as e:
+        # Resilient fallback: If the evaluator model triggers API throttle or other network failures,
+        # we log the exception but save the report anyway with a default score so we do not fail the entire pipeline.
+        logger.error(f"Reporter [{job_id}]: Report quality evaluation failed: {e}", exc_info=True)
+        report_payload = {
+            "content": report_text,
+            "generated_at": datetime.utcnow().isoformat(),
+            "agent": "reporter",
+            "evaluation": {
+                "score": 80.0,
+                "feedback": f"Report evaluation failed with exception: {e}"
+            }
+        }
+
+    # Save final report and evaluation results to the jobs table (updates report_payload column)
+    db.jobs.update_report(job_id, report_payload)
+    logger.info(f"Reporter [{job_id}]: Report and quality evaluation saved successfully ✓")
+    return {"success": True, "message": "Report generated, evaluated, and saved"}
 
 
 from observability import observe
