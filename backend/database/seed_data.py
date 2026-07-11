@@ -24,7 +24,7 @@ database = os.environ.get("AURORA_DATABASE", "finai")
 region = os.environ.get("DEFAULT_AWS_REGION", "us-east-1")
 
 if not cluster_arn or not secret_arn:
-    print("❌ Missing AURORA_CLUSTER_ARN or AURORA_SECRET_ARN in env configuration")
+    print("[ERROR] Missing AURORA_CLUSTER_ARN or AURORA_SECRET_ARN in env configuration")
     exit(1)
 
 # Initialize AWS RDS Data API client
@@ -227,7 +227,7 @@ def insert_instrument(instrument_data):
         # Validate data against constraints (sums must equal 100%)
         instrument = InstrumentCreate(**instrument_data)
     except ValidationError as e:
-        print(f"    ❌ Validation error for {instrument_data.get('symbol')}: {e}")
+        print(f"    [ERROR] Validation error for {instrument_data.get('symbol')}: {e}")
         return False
 
     validated = instrument.model_dump()
@@ -267,15 +267,15 @@ def insert_instrument(instrument_data):
                 {"name": "allocation_asset_class", "value": {"stringValue": json.dumps(validated["allocation_asset_class"])}},
             ],
         )
-        print(f"    ✅ Seeded {validated['symbol']}")
+        print(f"    [OK] Seeded {validated['symbol']}")
         return True
     except ClientError as e:
-        print(f"    ❌ DB insertion failed for {validated['symbol']}: {e}")
+        print(f"    [ERROR] DB insertion failed for {validated['symbol']}: {e}")
         return False
 
 
 if __name__ == "__main__":
-    print("🌱 Loading initial seed instruments data...")
+    print("Loading initial seed instruments data...")
     print("=" * 50)
     success = 0
     for idx, inst in enumerate(INSTRUMENTS, 1):

@@ -265,11 +265,25 @@ class FrontendStack(Stack):
         # ----------------------------------------------------
         # 6. HTTP API Gateway Setup
         # ----------------------------------------------------
-        # Expose the backend FastAPI Lambda function via HTTP API Gateway.
+        # ----------------------------------------------------
+        # 6. HTTP API Gateway Setup
+        # ----------------------------------------------------
+        # What is API Gateway?
+        # Think of API Gateway as the "front door" or "receptionist" for our backend.
+        # It takes incoming requests from the public internet (the browser) and routes them to 
+        # the appropriate AWS service (in this case, our FastAPI Lambda function).
+        # We use CfnApi here, which represents a CloudFormation L1 low-level construct.
         self.api_gw = apigw2.CfnApi(
             self, "ApiGateway",
             name="finai-api-gateway",
+            # HTTP protocol is chosen because it is faster, cheaper, and easier to set up 
+            # than traditional REST API Gateways.
             protocol_type="HTTP",
+            # CORS (Cross-Origin Resource Sharing) Configuration:
+            # When the frontend (Streamlit) tries to fetch data from the backend API on a different domain,
+            # the browser security policies block it unless the server explicitly allows it.
+            # Here, we authorize standard authorization and content-type headers, permit standard REST methods,
+            # and allow access from any public origin ("*").
             cors_configuration=apigw2.CfnApi.CorsProperty(
                 allow_headers=["authorization", "content-type", "x-amz-date", "x-api-key", "x-amz-security-token"],
                 allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
@@ -277,10 +291,16 @@ class FrontendStack(Stack):
             )
         )
 
-        # stage: Default auto-deployed HTTP stage
+        # Stage Setup:
+        # A "Stage" is a deployment environment (like "development", "staging", or "production").
+        # Here, we use the special "$default" stage. 
+        # "auto_deploy=True" means that whenever we make a change to routes or integrations in our code,
+        # API Gateway automatically publishes those changes to the live URL immediately.
+        # "throttling" acts as a speed limit: it prevents our backend from being overwhelmed by spam
+        # or infinite code loops by capping traffic to 100 requests per second.
         self.stage = apigw2.CfnStage(
             self, "ApiStage",
-            api_id=self.api_gw.ref,
+            api_id=self.api_gw.ref, # Links this stage to the API Gateway defined above
             stage_name="$default",
             auto_deploy=True,
             default_route_settings=apigw2.CfnStage.RouteSettingsProperty(
@@ -289,23 +309,38 @@ class FrontendStack(Stack):
             )
         )
 
-        # integration: Connects the API Gateway to our FastAPI backend Lambda function
+        # Integration Setup:
+        # An "Integration" connects the API Gateway receptionist to the actual worker (our Lambda function).
+        # We use "AWS_PROXY" integration, which tells API Gateway to take the entire raw HTTP request 
+        # (headers, body, query parameters) and forward it as-is to our Lambda function's input event.
+        # "payload_format_version='2.0'" specifies the modern, simplified JSON payload format format 
+        # used by AWS HTTP APIs.
         self.integration = apigw2.CfnIntegration(
             self, "LambdaIntegration",
             api_id=self.api_gw.ref,
             integration_type="AWS_PROXY",
-            integration_uri=self.api_lambda.function_arn,
+            integration_uri=self.api_lambda.function_arn, # Points to our FastAPI Lambda function
             payload_format_version="2.0"
         )
 
-        # routes: Route all incoming '/api/*' requests directly to our Lambda integration
+        # Routes Setup:
+        # A "Route" tells API Gateway: "If a user goes to this path with this HTTP method, send them to this target."
+        #
+        # "ANY /api/{proxy+}" is a powerful wildcard catch-all route:
+        # 1. "ANY" matches any HTTP method (GET, POST, PUT, DELETE).
+        # 2. "/api/{proxy+}" matches /api/ and any sub-path after it (e.g. /api/user, /api/accounts/123/positions).
+        # This allows our single FastAPI app inside the Lambda to handle all routing internally.
         self.route_any = apigw2.CfnRoute(
             self, "RouteAny",
             api_id=self.api_gw.ref,
             route_key="ANY /api/{proxy+}",
-            target=f"integrations/{self.integration.ref}"
+            target=f"integrations/{self.integration.ref}" # Routes traffic to our Lambda Integration
         )
 
+        # "OPTIONS /api/{proxy+}" is specifically used to handle browser CORS Preflight requests.
+        # Before a browser sends a sensitive request (like a POST or DELETE), it sends an OPTIONS request first
+        # to ask the server "Are you allowed to receive requests from me?". 
+        # This route forwards OPTIONS requests to our Lambda integration to return correct CORS response headers.
         self.route_options = apigw2.CfnRoute(
             self, "RouteOptions",
             api_id=self.api_gw.ref,
@@ -313,7 +348,11 @@ class FrontendStack(Stack):
             target=f"integrations/{self.integration.ref}"
         )
 
-        # add_permission: Authorizes the API Gateway service to invoke our API Lambda function
+        # Lambda Permissions Policy:
+        # By default in AWS, everything is locked down. API Gateway is not allowed to run Lambda functions
+        # unless we explicitly grant permission.
+        # This adds an IAM policy statement allowing the API Gateway service principal (apigateway.amazonaws.com)
+        # to invoke our FastAPI Lambda function.
         self.api_lambda.add_permission(
             "AllowExecutionFromAPIGateway",
             principal=iam.ServicePrincipal("apigateway.amazonaws.com"),
@@ -321,10 +360,12 @@ class FrontendStack(Stack):
             source_arn=f"arn:aws:execute-api:{self.region}:{self.account}:{self.api_gw.ref}/*/*"
         )
 
+
         # ----------------------------------------------------
         # 7. CloudFront CDN Unified Entrypoint (CORS Free)
         # ----------------------------------------------------
         # If the Streamlit frontend calls the backend on a different domain, we get CORS blocks.
+        # (http://finai-load-balancer.amazonaws.com -> https://xyz.execute-api.amazonaws.com/api/create-account)
         # CloudFront acts as a single secure origin:
         # - Default requests (e.g. '/') route to the Streamlit Fargate ALB.
         # - Requests starting with '/api/*' route to the API Gateway Endpoint.

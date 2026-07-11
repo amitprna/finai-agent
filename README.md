@@ -272,45 +272,76 @@ python scripts/build_api_zip.py
 
 ---
 
-### Step 2: Bootstrap & Deploy the CloudFormation Stacks (Option A - Separately)
-To understand resource dependencies and trace the deployment of each architectural layer step-by-step, deploy the stacks one-by-one in this order:
+### Step 2: Bootstrap & Deploy the CloudFormation Stacks
+> [!IMPORTANT]
+> **CDK Deployment Sequencing Rule**
+> The `FinaiFrontendStack` reads database configuration variables (`AURORA_CLUSTER_ARN` and `AURORA_SECRET_ARN`) from your local `.env` environment at template synthesis time. 
+> 
+> If you deploy all stacks concurrently using `cdk deploy --all` on a fresh environment, the database resource ARNs do not exist yet. As a result, the template compiles using the fallback `-dummy` secret string, causing API errors at runtime.
+> 
+> **You must deploy the stacks step-by-step in the following sequence:**
 
-1.  **Deploy SageMaker embeddings and Web scraping tools first**:
+1.  **Deploy SageMaker embeddings and Web scraping tools**:
     ```bash
     npx cdk deploy FinaiResearcherStack --require-approval never
     ```
-2.  **Deploy Database and Agent compute resources second**:
+
+2.  **Deploy Database and Agent compute resources**:
     ```bash
     npx cdk deploy FinaiDatabaseAgentsStack --require-approval never
     ```
-3.  **Deploy the frontend user portal and API Gateway routing last**:
+
+3.  **Update your local environment configurations**:
+    Copy the outputs from the terminal completion screen of the `FinaiDatabaseAgentsStack` (`AuroraClusterArn` and `AuroraSecretArn`) and add them to your local `.env` file in the `finai-agent/` directory:
+    ```env
+    AURORA_CLUSTER_ARN="arn:aws:rds:us-east-1:123456789012:cluster:finai-aurora-cluster"
+    AURORA_SECRET_ARN="arn:aws:secretsmanager:us-east-1:123456789012:secret:finai-aurora-credentials-..."
+    ```
+
+4.  **Deploy the frontend user portal and API Gateway routing**:
+    *Once the `.env` file is updated*, run the deployment for the frontend layer so that CDK compiles the correct database values into the API Lambda's configuration:
     ```bash
     npx cdk deploy FinaiFrontendStack --require-approval never
     ```
 
----
-
-
-> [!TIP]
-> **Deploy All Stacks at Once (Single Command Deployment)**
-> If you want to deploy all stacks simultaneously in a single command, bootstrap your AWS environment (if not already done) and execute:
-> ```bash
-> # Bootstrap CDK (only required on a new AWS account/region)
-> npx cdk bootstrap
-> 
-> # Deploy all stacks concurrently
-> npx cdk deploy --all --require-approval never
-> ```
 
 
 ---
 
 ### Step 3: Run Database Migrations
-Create tables, triggers, indices, and database helper functions in the Aurora Serverless PostgreSQL cluster:
+Create tables, triggers, indices, and database helper functions in the Aurora Serverless PostgreSQL cluster.
+
+Before running the migration, you must supply the database cluster and credentials secret ARNs (which were outputted by the CDK deployment in **Step 2**):
+*   `AURORA_CLUSTER_ARN` (the `AuroraClusterArn` output)
+*   `AURORA_SECRET_ARN` (the `AuroraSecretArn` output)
+
+You can configure these variables in one of two ways:
+
+#### Option A: Save to your local `.env` file
+Add the values to the `.env` file in the `finai-agent/` directory:
+```env
+AURORA_CLUSTER_ARN="arn:aws:rds:us-east-1:123456789012:cluster:finai-aurora-cluster"
+AURORA_SECRET_ARN="arn:aws:secretsmanager:us-east-1:123456789012:secret:finai-aurora-credentials-..."
+```
+
+#### Option B: Export them directly in your terminal shell
+**Bash / macOS / Linux:**
 ```bash
-# Verify your local .env contains output ARNs for Aurora Cluster & Secrets manager
+export AURORA_CLUSTER_ARN="arn:aws:rds:us-east-1:123456789012:cluster:finai-aurora-cluster"
+export AURORA_SECRET_ARN="arn:aws:secretsmanager:us-east-1:123456789012:secret:finai-aurora-credentials-..."
+```
+
+**PowerShell (Windows):**
+```powershell
+$env:AURORA_CLUSTER_ARN="arn:aws:rds:us-east-1:123456789012:cluster:finai-aurora-cluster"
+$env:AURORA_SECRET_ARN="arn:aws:secretsmanager:us-east-1:123456789012:secret:finai-aurora-credentials-..."
+```
+
+Once the environment variables are set, run the migration runner:
+```bash
 uv run backend/database/run_migrations.py
 ```
+
 
 ---
 
