@@ -68,7 +68,7 @@ class FrontendStack(Stack):
         user_pool = cognito.UserPool(
             self, "FinaiUserPool",
             user_pool_name="finai-user-pool",
-            # self_sign_up_enabled: Permits public sign-ups on our streamlit login page.
+            # self_sign_up_enabled: Permits public sign-ups on our streamlit login page else only admin can create.
             self_sign_up_enabled=True,
             # sign_in_aliases: Users can sign in using either their username or email address.
             sign_in_aliases=cognito.SignInAliases(username=True, email=True),
@@ -79,7 +79,7 @@ class FrontendStack(Stack):
         )
 
         # pre_sign_up_trigger: A helper Lambda trigger that auto-confirms user registrations.
-        # This keeps the bootcamp simple: students can register and immediately log in
+        # students can register and immediately log in
         # without needing to configure AWS Simple Email Service (SES) to send verification emails.
         pre_sign_up_trigger = _lambda.Function(
             self, "PreSignUpTrigger",

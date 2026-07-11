@@ -24,7 +24,7 @@ import streamlit as st
 import streamlit.components.v1 as components
 from dotenv import load_dotenv
 
-# Load configurations from the project's .env file
+# Load configurations from the project's .env file (overrides existing environment values)
 load_dotenv(override=True)
 
 # ----------------------------------------------------
@@ -34,13 +34,19 @@ load_dotenv(override=True)
 # this is the CloudFront secure HTTPS URL; locally it falls back to port 8000.
 API_BASE_URL = os.getenv("API_BASE_URL", "http://127.0.0.1:8000")
 
-# Cognito environment variables needed to perform user registration & login
+# Cognito environment variables needed to perform user registration & login.
+# In a local development environment, these can be left blank, in which case the app
+# runs in "Mock Auth" mode using a hardcoded developer user ID.
 COGNITO_USER_POOL_ID = os.getenv("COGNITO_USER_POOL_ID", "")
 COGNITO_CLIENT_ID = os.getenv("COGNITO_CLIENT_ID", "")
 COGNITO_REGION = os.getenv("COGNITO_REGION") or os.getenv("DEFAULT_AWS_REGION", "us-east-1")
 
 
-# ── Page Config ────────────────────────────────────────────────────────────────
+# ----------------------------------------------------
+# 2. Page Configuration & Custom CSS Styling
+# ----------------------------------------------------
+# st.set_page_config must be called as the very first Streamlit command.
+# It configures browser tab metadata and default sidebar behaviors.
 st.set_page_config(
     page_title="FinAI — Indian Wealth Advisor",
     page_icon="📈",
@@ -48,62 +54,65 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-# ── Neutral White CSS ──────────────────────────────────────────────────────────
+# Custom Theme Injection (Japandi Contrast Style):
+# Streamlit's default components can look generic. We inject custom CSS into the HTML body
+# to style app background colors, cards, font families (Outfit/Inter), metric blocks,
+# and give our navigation tabs custom color highlights (Sage Green, Sand Orange, Slate Blue, Rust Red).
 st.markdown("""
 <style>
     /* Premium neutral white theme */
-    .stApp {{ 
+    .stApp { 
         background-color: #ffffff; 
         color: #1e293b; 
         font-family: 'Outfit', 'Inter', -apple-system, sans-serif;
-    }}
+    }
     
-    /* Minimal card containers */
-    .cosmic-card {{ 
+    /* Minimal card containers for report blocks and advisor status cards */
+    .cosmic-card { 
         background: #ffffff; 
         border: 1px solid #e2e8f0;
         border-radius: 8px; 
         padding: 20px; 
         margin-bottom: 18px; 
         box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.05), 0 1px 2px 0 rgba(0, 0, 0, 0.06);
-    }}
+    }
     
-    /* Clean typography */
-    .neon-title  {{ 
+    /* Clean typography classes */
+    .neon-title  { 
         color: #0f172a; 
         font-weight: 800; 
         font-size: 2.8rem; 
         margin: 0; 
         letter-spacing: -0.5px;
-    }}
-    .neon-sub    {{ 
+    }
+    .neon-sub    { 
         color: #64748b; 
         font-size: 0.9rem; 
         letter-spacing: 1.5px;
         text-transform: uppercase; 
         margin-bottom: 24px; 
         font-weight: 600;
-    }}
+    }
     
-    /* Sidebar styling */
-    section[data-testid="stSidebar"] {{ 
+    /* Sidebar styling: light grey background with a clean border */
+    section[data-testid="stSidebar"] { 
         background: #f8fafc !important;
         border-right: 1px solid #e2e8f0 !important; 
-    }}
+    }
     
     /* Premium metric blocks */
-    div[data-testid="stMetricValue"] {{ 
+    div[data-testid="stMetricValue"] { 
         font-size: 1.8rem !important; 
         font-weight: 700 !important;
         color: #0f172a !important; 
-    }}
-    div[data-testid="stMetricLabel"] {{ 
+    }
+    div[data-testid="stMetricLabel"] { 
         color: #64748b !important; 
         font-weight: 500 !important;
         text-transform: uppercase;
         letter-spacing: 0.5px;
         font-size: 0.75rem !important;
-    }}
+    }
     
     /* Japandi Contrast Tabs Styling */
     div[data-baseweb="tab-highlight"] {
@@ -123,18 +132,18 @@ st.markdown("""
         margin: 0 4px !important;
     }
     
-    /* Inactive states: stone/sand background with distinct colored text */
+    /* Inactive tab states: stone/sand background with distinct colored text */
     button[data-baseweb="tab"]:nth-of-type(1) { background-color: #FAF8F6 !important; color: #7A8B75 !important; }
     button[data-baseweb="tab"]:nth-of-type(2) { background-color: #FAF8F6 !important; color: #D49B48 !important; }
     button[data-baseweb="tab"]:nth-of-type(3) { background-color: #FAF8F6 !important; color: #455A6F !important; }
     button[data-baseweb="tab"]:nth-of-type(4) { background-color: #FAF8F6 !important; color: #B85C43 !important; }
     
-    /* Hover states: darken background slightly */
+    /* Hover tab states: darken background slightly */
     button[data-baseweb="tab"]:hover { 
         background-color: #EAE5E0 !important; 
     }
 
-    /* Active states: distinct solid Japandi colors with white text */
+    /* Active tab states: distinct solid Japandi colors with white text */
     button[data-baseweb="tab"]:nth-of-type(1)[aria-selected="true"] { 
         background-color: #7A8B75 !important; 
         color: #FFFFFF !important; 
@@ -157,37 +166,36 @@ st.markdown("""
     }
     
     /* Subtle highlighting for elements */
-    .highlight-badge {{
+    .highlight-badge {
         background-color: #f1f5f9;
         color: #0f172a;
         padding: 4px 8px;
         border-radius: 4px;
         font-size: 0.85rem;
         font-weight: 600;
-    }}
+    }
 </style>
 """, unsafe_allow_html=True)
 
 # ----------------------------------------------------
-# 2. Session State Management
+# 3. Session State Management
 # ----------------------------------------------------
 # Streamlit runs from top-to-bottom on every user interaction. To persist data (like the
 # logged-in user's token or the currently running job ID) across reruns, we use st.session_state.
 if "user_id"      not in st.session_state: st.session_state.user_id      = "test_user_001"
 if "active_job_id" not in st.session_state: st.session_state.active_job_id = None
 
-# ----------------------------------------------------
-# 3. Main Page Headers & Design Elements
-# ----------------------------------------------------
+# Render main header elements
 st.markdown("<h1 class='neon-title'>FinAI</h1>", unsafe_allow_html=True)
 st.markdown("<p class='neon-sub'>Agentic Indian Equity Portfolio Advisor</p>", unsafe_allow_html=True)
 
+
 # ----------------------------------------------------
-# 4. REST API Helper Functions
+# 4. REST API Wrapper Methods
 # ----------------------------------------------------
 # These helper functions perform HTTP requests to our FastAPI backend.
-# They automatically inject the current session's JWT bearer token under the 
-# 'Authorization' header to pass through the Cognito verification guard.
+# They automatically inject the current session's user ID/JWT token under the 
+# 'Authorization' header to pass through the Cognito verification guard on the API gateway.
 
 def headers():
     """Build Authorization bearer headers for secure backend routes."""
@@ -201,8 +209,8 @@ def api_get(path, **kw):
     except Exception:
         return None
 
-
 def api_post(path, **kw):
+    """Execute a POST request against the API server."""
     try:
         r = requests.post(f"{API_BASE_URL}{path}", headers=headers(), timeout=10, **kw)
         if r.ok:
@@ -219,6 +227,7 @@ def api_post(path, **kw):
         return None
 
 def api_put(path, **kw):
+    """Execute a PUT request against the API server."""
     try:
         r = requests.put(f"{API_BASE_URL}{path}", headers=headers(), timeout=5, **kw)
         if r.ok:
@@ -235,6 +244,7 @@ def api_put(path, **kw):
         return None
 
 def api_delete(path, **kw):
+    """Execute a DELETE request against the API server."""
     try:
         r = requests.delete(f"{API_BASE_URL}{path}", headers=headers(), timeout=5, **kw)
         if r.ok:
@@ -250,15 +260,23 @@ def api_delete(path, **kw):
     except Exception:
         return None
 
-# ── COGNITO AUTHENTICATION HELPERS ─────────────────────────────────────────────
+
+# ----------------------------------------------------
+# 5. AWS Cognito Authentication Helpers
+# ----------------------------------------------------
+# These connect directly to AWS Cognito Identity Provider service to handle user registration,
+# sign-in, and verification code confirmations.
+# Config(signature_version=UNSIGNED) is used so we don't need local AWS credentials to make these calls.
 import boto3
 from botocore import UNSIGNED
 from botocore.config import Config
 
 def get_cognito_client():
+    """Returns an unsigned Cognito boto3 client instance."""
     return boto3.client("cognito-idp", region_name=COGNITO_REGION, config=Config(signature_version=UNSIGNED))
 
 def cognito_sign_in(username, password):
+    """Logs user in using Cognito USER_PASSWORD_AUTH flow. Returns IdToken on success."""
     try:
         client = get_cognito_client()
         resp = client.initiate_auth(
@@ -275,6 +293,7 @@ def cognito_sign_in(username, password):
         return None
 
 def cognito_sign_up(username, email, password):
+    """Registers a new user in Cognito. Note: Pools are configured to auto-confirm emails in local mode."""
     try:
         client = get_cognito_client()
         client.sign_up(
@@ -291,6 +310,7 @@ def cognito_sign_up(username, email, password):
         return False
 
 def cognito_confirm_sign_up(username, code):
+    """Submits verification code to Cognito to confirm account registration."""
     try:
         client = get_cognito_client()
         client.confirm_sign_up(
@@ -303,10 +323,14 @@ def cognito_confirm_sign_up(username, code):
         st.error(f"Confirmation failed: {str(e)}")
         return False
 
-# ── SIDEBAR ────────────────────────────────────────────────────────────────────
+
+# ----------------------------------------------------
+# 6. Sidebar (Auth Configuration & User Settings)
+# ----------------------------------------------------
 with st.sidebar:
     st.markdown("### 🔑 Authentication Mode")
     
+    # Check if Cognito environment variables are present before exposing production login UI
     auth_modes = ["Mock Auth (Local Dev)"]
     if COGNITO_USER_POOL_ID and COGNITO_CLIENT_ID:
         auth_modes.append("Cognito Auth (Production)")
@@ -315,6 +339,7 @@ with st.sidebar:
     
     st.markdown("---")
     
+    # ── Cognito Authentication Flows ──
     if selected_auth_mode == "Cognito Auth (Production)":
         is_logged_in = st.session_state.user_id and st.session_state.user_id != "test_user_001" and len(st.session_state.user_id) > 50
         if is_logged_in:
@@ -349,7 +374,7 @@ with st.sidebar:
                     else:
                         with st.spinner("Signing up..."):
                             if cognito_sign_up(user_in, email_in, pass_in):
-                                st.success("Registration successful! Your account is auto-confirmed. Please switch 'Action' above to 'Log In' to sign in immediately.")
+                                st.success("Registration successful! Please switch 'Action' above to 'Log In' or 'Confirm Code' if required.")
                                 
             elif cog_action == "Confirm Code":
                 user_in = st.text_input("Username", key="cog_conf_user")
@@ -362,18 +387,19 @@ with st.sidebar:
                             if cognito_confirm_sign_up(user_in, code_in):
                                 st.success("Account confirmed! You can now Log In.")
     
+    # ── Mock Authentication (Default) ──
     else:
-        # Mock Auth (Local Dev)
         st.markdown("#### 👤 Local Developer Profile")
         uid_input = st.text_input("User ID / Mock Token", value=st.session_state.user_id)
         if uid_input != st.session_state.user_id:
             st.session_state.user_id = uid_input
             st.rerun()
 
-    # Fetch user profile details
+    # Fetch user demographic settings from backend API
     profile_resp = api_get("/api/user")
     user_profile = profile_resp.get("user") if profile_resp else None
 
+    # Render target retirement income forms
     if user_profile:
         st.markdown(f"**👤 {user_profile.get('display_name', 'Advisor')}**")
         st.caption(f"ID: {user_profile.get('user_id')}")
@@ -408,7 +434,13 @@ with st.sidebar:
             else:
                 st.error("Reset failed")
 
-# ── Fetch shared data (accounts + positions) ───────────────────────────────────
+
+# ----------------------------------------------------
+# 7. Portfolio Valuation Aggregation
+# ----------------------------------------------------
+# We pull user accounts and position assets from backend REST APIs.
+# We iterate through cash balances and stock positions (multiplying qty * price)
+# to compute the total net worth of the portfolio.
 accounts = api_get("/api/accounts") or []
 positions_by_account = {}
 total_cash = total_invested = 0.0
@@ -417,14 +449,18 @@ for acc in accounts:
     acc_name = acc.get("account_name", "")
     acc_cash = float(acc.get("cash_balance", 0))
     if acc_name == "Demat Account":
+        # Uninvested cash resides inside Demat Account cash balance
         total_cash += acc_cash
     else:
-        # NPS, PPF, Gold, Silver are treated as invested assets directly
+        # Non-demat accounts (PPF, NPS, Gold, Silver) are treated directly as invested assets
         total_invested += acc_cash
 
+    # Fetch positions list for this account
     pos_data = api_get(f"/api/accounts/{acc['id']}/positions")
     positions = (pos_data or {}).get("positions", [])
     positions_by_account[acc["id"]] = positions
+    
+    # Calculate position values based on ticker quantity * current price
     for pos in positions:
         qty = float(pos.get("quantity") or 0)
         price = float((pos.get("instrument") or {}).get("current_price") or 0)
@@ -432,15 +468,20 @@ for acc in accounts:
 
 total_value = total_cash + total_invested
 
-# ── TABS ───────────────────────────────────────────────────────────────────────
+
+# ----------------------------------------------------
+# 8. Interactive Dashboard Tabs
+# ----------------------------------------------------
 tab1, tab2, tab3, tab4 = st.tabs(["📊 Dashboard", "💼 Accounts", "🤖 AI Advisor", "📝 Report"])
 
-# ════════════════════════════════════════════════════════════════════
+
+# ====================================================================
 # TAB 1 — DASHBOARD
-# ════════════════════════════════════════════════════════════════════
+# ====================================================================
 with tab1:
     st.markdown("### 📈 Portfolio Overview")
 
+    # Render net worth metrics in four horizontal columns
     c1, c2, c3, c4 = st.columns(4)
     c1.metric("Total Net Worth",   f"₹{total_value:,.0f}")
     c2.metric("Invested Assets",   f"₹{total_invested:,.0f}")
@@ -451,7 +492,8 @@ with tab1:
     if not accounts:
         st.info("💡 No portfolio found. Click **🌱 Seed Data** in the sidebar to load a sample Indian equity portfolio.")
     else:
-        # Aggregate allocation data across all positions
+        # Allocate categories (Asset Classes, Sectors, Regions)
+        # We loop through positions and cash balances to distribute fractional valuations.
         asset_data, sector_data, region_data = {}, {}, {}
         holdings, account_dist = [], []
 
@@ -489,24 +531,32 @@ with tab1:
                 acc_val += val
                 sym   = pos.get("symbol", "")
                 name  = inst.get("name", sym)
+                
+                # Top holdings breakdown
                 holdings.append({"Symbol": sym, "Name": name, "Value (₹)": val})
+                
+                # Sum asset class percentages
                 for cls, pct in (inst.get("allocation_asset_class") or {}).items():
                     k = cls.replace("_", " ").title()
                     asset_data[k] = asset_data.get(k, 0) + val * float(pct) / 100
+                # Sum sector exposure percentages
                 for sec, pct in (inst.get("allocation_sectors") or {}).items():
                     k = sec.replace("_", " ").title()
                     sector_data[k] = sector_data.get(k, 0) + val * float(pct) / 100
+                # Sum geographic region percentages
                 for reg, pct in (inst.get("allocation_regions") or {}).items():
                     k = reg.replace("_", " ").title()
                     region_data[k] = region_data.get(k, 0) + val * float(pct) / 100
+            
+            # Account balance totals mapping
             account_dist.append({"Account": acc_name, "Value": acc_val})
 
-        # Premium Japandi color palette
+        # Premium JAPANDI color sequence
         JAPANDI_PALETTE = ["#B85C43", "#7A8B75", "#455A6F", "#D49B48", "#9A8A78", "#CBBFB4", "#3C4048"]
 
         col_l, col_r = st.columns(2)
 
-        # Asset class + account pie charts (left column)
+        # Render Pie Charts in the Left Column
         with col_l:
             if asset_data:
                 fig = px.pie(pd.DataFrame(asset_data.items(), columns=["Class", "Value"]),
@@ -521,7 +571,7 @@ with tab1:
                 fig.update_layout(paper_bgcolor="rgba(0,0,0,0)", font_color="#1e293b")
                 st.plotly_chart(fig, width="stretch")
 
-        # Sector bar + top holdings bar (right column)
+        # Render Bar Charts in the Right Column
         with col_r:
             if sector_data:
                 df_sec = pd.DataFrame(sector_data.items(), columns=["Sector", "Value"]).sort_values("Value", ascending=False)
@@ -538,26 +588,29 @@ with tab1:
                 fig.update_layout(paper_bgcolor="rgba(0,0,0,0)", font_color="#1e293b", showlegend=False)
                 st.plotly_chart(fig, width="stretch")
 
-# ════════════════════════════════════════════════════════════════════
+
+# ====================================================================
 # TAB 2 — ACCOUNTS MANAGER
-# ════════════════════════════════════════════════════════════════════
+# ====================================================================
 with tab2:
     st.markdown("### 💼 Portfolio Accounts & Positions")
 
     if not accounts:
         st.info("No accounts yet. Use **🌱 Seed Data** in the sidebar.")
     else:
+        # Loop through active accounts and render a collapsible expander for each
         for acc in accounts:
             acc_id   = acc["id"]
             acc_name = acc.get("account_name", "Unnamed")
             cash     = float(acc.get("cash_balance", 0))
             positions = positions_by_account.get(acc_id, [])
 
-            # Professional labelling based on account type
+            # Format the account header label clearly
             label = f"📁 {acc_name}  —  Amount Invested: ₹{cash:,.2f}" if acc_name != "Demat Account" else f"📁 {acc_name}  —  Cash: ₹{cash:,.2f}  |  {len(positions)} positions"
+            
             with st.expander(label, expanded=False):
-                # Display positions table for Demat accounts
                 if acc_name == "Demat Account":
+                    # Demat Account allows trading positions
                     if positions:
                         rows = []
                         for pos in positions:
@@ -575,7 +628,7 @@ with tab2:
                         df = pd.DataFrame(rows)
                         st.dataframe(df.drop(columns=["_id"]), width="stretch")
 
-                        # Remove position
+                        # Remove positions form controls
                         sym_options = [r["Symbol"] for r in rows]
                         del_col, btn_col = st.columns([3, 1])
                         with del_col:
@@ -593,7 +646,7 @@ with tab2:
                     
                     st.markdown("---")
                     
-                    # Add Position (Updates cash automatically; no Update Cash UI)
+                    # Form to ADD positions (updates cash balance automatically in backend logic)
                     st.markdown("##### ➕ Add Position")
                     sym_in = st.text_input("Ticker (e.g. RELIANCE.NS)", key=f"sym_{acc_id}")
                     qty_in = st.number_input("Quantity (shares)", min_value=0.01, step=1.0, key=f"qty_{acc_id}")
@@ -613,7 +666,7 @@ with tab2:
 
                     st.markdown("---")
                     
-                    # Update Cash Balance
+                    # Form to update remaining cash balance in the account
                     st.markdown("##### 💵 Cash Balance")
                     new_cash = st.number_input("Update Cash Balance (₹)", min_value=0.0, value=cash, step=1000.0, key=f"cash_{acc_id}")
                     if st.button("Update Cash Balance", key=f"cashbtn_{acc_id}"):
@@ -627,7 +680,7 @@ with tab2:
                         else:
                             st.error("Failed to update cash balance")
                 else:
-                    # Non-Demat accounts: directly input/update amount invested
+                    # Non-Demat accounts (e.g. NPS, PPF): directly input the cash invested amount
                     st.markdown("##### 💵 Amount Invested")
                     new_amount = st.number_input("Update Amount (₹)", min_value=0.0, value=cash, step=1000.0, key=f"amount_{acc_id}")
                     if st.button("Update Amount", key=f"amountbtn_{acc_id}"):
@@ -636,7 +689,7 @@ with tab2:
                             st.success(f"Amount invested updated to ₹{new_amount:,.0f}")
                             st.rerun()
 
-    # Create new account
+    # Create new account form fields
     st.markdown("---")
     st.markdown("### ➕ Open New Account")
     new_name = st.selectbox("Account Name", ["Demat Account", "NPS", "PPF", "Gold", "Silver"])
@@ -657,9 +710,10 @@ with tab2:
         else:
             st.error("Failed to create account")
 
-# ════════════════════════════════════════════════════════════════════
+
+# ====================================================================
 # TAB 3 — AI ADVISOR TEAM
-# ════════════════════════════════════════════════════════════════════
+# ====================================================================
 with tab3:
     st.markdown("### 🤖 AI Agent Team")
     st.markdown(
@@ -681,6 +735,7 @@ with tab3:
             if not accounts:
                 st.error("No portfolio found. Seed data first (sidebar).")
             else:
+                # Trigger the FastAPI analyze route, which initiates the async orchestrator pipeline
                 result = api_post("/api/analyze", json={"analysis_type": "portfolio"})
                 if result and result.get("job_id"):
                     st.session_state.active_job_id = result["job_id"]
@@ -694,6 +749,7 @@ with tab3:
         st.markdown("<div class='cosmic-card'>", unsafe_allow_html=True)
         st.markdown("#### 📡 Live Status")
 
+        # If a job has been started, we enter a polling loop to query its status
         if st.session_state.active_job_id:
             job_id = st.session_state.active_job_id
             st.markdown(f"**Active Job:** `{job_id[:16]}…`")
@@ -701,7 +757,8 @@ with tab3:
             status_area = st.empty()
             progress    = st.progress(0)
 
-            for step in range(60):           # Poll for up to 2 minutes
+            # Poll the job status every 3 seconds for up to 3 minutes
+            for step in range(60):
                 job = api_get(f"/api/jobs/{job_id}")
                 status = (job or {}).get("status", "pending")
 
@@ -727,7 +784,7 @@ with tab3:
             st.caption("No active job. Click **Run AI Team Analysis** to start.")
         st.markdown("</div>", unsafe_allow_html=True)
 
-    # Historical jobs table
+    # Render a historical jobs log table
     st.markdown("---")
     st.markdown("#### ⏳ Analysis History")
     jobs_data = api_get("/api/jobs") or {}
@@ -743,13 +800,14 @@ with tab3:
     else:
         st.caption("No past jobs.")
 
-# ════════════════════════════════════════════════════════════════════
+
+# ====================================================================
 # TAB 4 — ANALYSIS REPORT
-# ════════════════════════════════════════════════════════════════════
+# ====================================================================
 with tab4:
     st.markdown("### 📝 AI Analysis Report & Projections")
 
-    # Find latest completed job
+    # Find the latest completed job to load results
     completed_job = None
     jobs_data = api_get("/api/jobs") or {}
     for j in (jobs_data.get("jobs") or []):
@@ -758,7 +816,7 @@ with tab4:
                 completed_job = j
                 break
             if not completed_job:
-                completed_job = j  # Fall back to most recent completed
+                completed_job = j  # Fall back to most recent completed job
 
     if not completed_job:
         st.info("💡 No completed analysis yet. Go to **🤖 AI Advisor** tab and run an analysis first.")
@@ -767,7 +825,8 @@ with tab4:
                     f"(completed: {completed_job.get('completed_at', 'N/A')})")
         st.markdown("---")
 
-        # ── Narrative Report ──────────────────────────────────────────
+        # ── 1. Narrative Report ──
+        # Display the Markdown text report generated by the Reporter sub-agent
         report_payload = completed_job.get("report_payload") or {}
         report_content = report_payload.get("content") if isinstance(report_payload, dict) else None
         if report_content:
@@ -778,7 +837,8 @@ with tab4:
         else:
             st.warning("Report not found in this job.")
 
-        # ── Retirement Projection ─────────────────────────────────────
+        # ── 2. Retirement Projection Narrative ──
+        # Renders the Monte Carlo projections narrative written by the Retirement Specialist
         ret_payload = completed_job.get("retirement_payload") or {}
         ret_content = ret_payload.get("analysis") if isinstance(ret_payload, dict) else None
         if ret_content:
@@ -789,7 +849,9 @@ with tab4:
         else:
             st.warning("Retirement projection not found in this job.")
 
-        # ── Dynamic Charts ────────────────────────────────────────────
+        # ── 3. Dynamic Visual Charts ──
+        # Extracts Plotly configurations generated by the Charter agent and renders them.
+        # Charts are displayed in a clean two-column grid.
         charts_payload = completed_job.get("charts_payload") or {}
         if isinstance(charts_payload, dict) and charts_payload:
             st.markdown("<div class='cosmic-card'>", unsafe_allow_html=True)
@@ -819,6 +881,7 @@ with tab4:
                             else:
                                 fig = px.bar(df_c, x="name", y="value", title=title,
                                              color_discrete_sequence=colors)
+                            # Customize layout margins and backgrounds for a premium feel
                             fig.update_layout(paper_bgcolor="rgba(0,0,0,0)", font_color="#1e293b",
                                               margin=dict(l=10, r=10, t=40, b=10))
                             st.plotly_chart(fig, width="stretch")
