@@ -35,7 +35,7 @@ from pydantic import BaseModel, Field
 from dotenv import load_dotenv
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 
-# Import database connection objects and validation schemas
+# Import database connection objects and validation schemas from internal packages
 from src import Database
 from src.schemas import AccountCreate, PositionCreate, InstrumentCreate
 
@@ -69,6 +69,17 @@ app.add_middleware(
 # ----------------------------------------------------
 # 3. Cognito User JWT Token Verification (Security Guard)
 # ----------------------------------------------------
+# Why do we need python-jose?
+# Users authenticate with AWS Cognito on the frontend. Once signed in, Cognito issues a
+# cryptographically signed JSON Web Token (JWT). The frontend includes this token in the
+# 'Authorization' header of every request.
+#
+# We use python-jose (jose module) to:
+# 1. Parse JWT headers to extract the Key ID ('kid') that signed the token.
+# 2. Reconstruct the Cognito RSA public key using standard jwk specifications.
+# 3. Cryptographically verify the token signature (proving the token is authentic).
+# 4. Check token claims such as expiration time ('exp') and audience ('aud').
+# 5. Safely decode the token payload to retrieve the user's Cognito UUID ('sub').
 import time
 from jose import jwt, jwk
 from jose.utils import base64url_decode
@@ -80,7 +91,7 @@ class CognitoCredentials(HTTPAuthorizationCredentials):
     model_config = ConfigDict(extra='allow')
     decoded: dict = {}
 
-# MOCK_AUTH allows students to run and test the application locally without deploying Cognito
+# MOCK_AUTH allows developers to run and test the application locally without deploying Cognito
 MOCK_AUTH = os.getenv("MOCK_AUTH", "false").lower() == "true"
 
 class CognitoGuard(HTTPBearer):
@@ -102,6 +113,7 @@ class CognitoGuard(HTTPBearer):
         """Fetch and cache public signing keys from AWS Cognito endpoint."""
         if self._keys is None and self.user_pool_id:
             try:
+                # We perform an async GET call to Cognito to load the keys
                 async with httpx.AsyncClient() as client:
                     r = await client.get(self.jwks_url)
                     if r.status_code == 200:
@@ -120,6 +132,7 @@ class CognitoGuard(HTTPBearer):
             
             sub = token
             name = "Mock User"
+            # If the mock token looks like a valid JWT token structure, decode the claims
             if len(token) > 50 and token.count(".") == 2:
                 try:
                     claims = jwt.get_unverified_claims(token)
@@ -143,7 +156,7 @@ class CognitoGuard(HTTPBearer):
         creds = CognitoCredentials(scheme=creds_parent.scheme, credentials=creds_parent.credentials)
         token = creds.credentials
         try:
-            # 1. Parse JWT header to find which public key signed the token
+            # 1. Parse JWT header (using python-jose) to find which public key signed the token
             unverified_header = jwt.get_unverified_header(token)
             kid = unverified_header.get("kid")
             if not kid:
@@ -161,6 +174,7 @@ class CognitoGuard(HTTPBearer):
                     raise HTTPException(status_code=401, detail="Public key not found in JWKS")
 
             # 3. Decrypt and verify signature
+            # We construct the public RSA key using python-jose's jwk constructor, then verify the signature
             public_key = jwk.construct(key_data)
             message, encoded_sig = token.rsplit('.', 1)
             decoded_sig = base64url_decode(encoded_sig.encode('utf-8'))
@@ -192,6 +206,7 @@ class CognitoGuard(HTTPBearer):
             logger.error(f"JWT verification error: {e}")
             raise HTTPException(status_code=401, detail=f"Invalid token: {str(e)}")
 
+# Instantiate security guard dependency
 auth_guard = CognitoGuard()
 
 async def get_current_user_id(creds: HTTPAuthorizationCredentials = Depends(auth_guard)) -> str:

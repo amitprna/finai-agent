@@ -1,18 +1,49 @@
+# ----------------------------------------------------
+# 1. Project Metadata & Configuration
+# ----------------------------------------------------
 [project]
 name = "api"
 version = "0.1.0"
 requires-python = ">=3.12"
+
+# ----------------------------------------------------
+# 2. Dependency List
+# ----------------------------------------------------
+# These list all requirements needed to run the backend REST API:
 dependencies = [
+    # finai-database: Our internal database client package (manages Aurora connections & execution)
     "finai-database",
+    
+    # boto3: Official AWS SDK for Python (used to invoke SQS, Lambda, and Cognito)
     "boto3>=1.40.29",
+    
+    # fastapi: High-performance modern web framework used to build REST endpoints
     "fastapi>=0.116.1",
+    
+    # httpx: Async HTTP client library used to fetch public JWKS JSON files from AWS Cognito endpoints
     "httpx>=0.28.1",
+    
+    # mangum: ASGI adapter that allows running FastAPI apps inside serverless AWS Lambda triggers
     "mangum>=0.19.0",
+    
+    # pydantic: Structured schema validator used for incoming request/response schemas
     "pydantic>=2.11.7",
+    
+    # python-dotenv: Parses local environment settings from workspace .env files
     "python-dotenv>=1.1.1",
+    
+    # python-jose: Cryptographic library used to parse and verify AWS Cognito JWT authorization tokens
     "python-jose>=3.5.0",
+    
+    # uvicorn: ASGI web server implementation used to run and test the FastAPI server locally
     "uvicorn>=0.35.0",
 ]
 
+# ----------------------------------------------------
+# 3. Workspace Configurations
+# ----------------------------------------------------
 [tool.uv.sources]
+# Tells the uv package manager that 'finai-database' resides in our workspace directory (sibling packages)
+# instead of trying to download it from PyPI.
 finai-database = { workspace = true }
+

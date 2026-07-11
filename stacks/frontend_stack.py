@@ -88,8 +88,6 @@ class FrontendStack(Stack):
             code=_lambda.Code.from_inline(
                 "def handler(event, context):\n"
                 "    event['response']['autoConfirmUser'] = True\n"
-                "    if 'email' in event['request']['userAttributes']:\n"
-                "        event['response']['autoVerifyEmail'] = True\n"
                 "    return event"
             )
         )
@@ -227,13 +225,8 @@ class FrontendStack(Stack):
         zip_path = os.path.abspath(
             os.path.join(os.path.dirname(__file__), "../backend/api/api_lambda.zip")
         )
-        if os.path.exists(zip_path):
-            lambda_code = _lambda.Code.from_asset(zip_path)
-        else:
-            # Fallback code used if build_api_zip.py hasn't been executed locally yet
-            lambda_code = _lambda.Code.from_inline(
-                "def handler(event, context): return {'statusCode': 200, 'body': 'Dummy Response'}"
-            )
+
+        lambda_code = _lambda.Code.from_asset(zip_path)
 
         api_log_group = logs.LogGroup(
             self, "ApiLambdaLogs",
