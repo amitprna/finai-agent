@@ -19,6 +19,13 @@ def analyze_portfolio(portfolio_data: Dict[str, Any]) -> str:
     Parses raw portfolio structures and aggregates valuations across accounts.
     Calculates percentage weights and compiles textual metrics for the LLM.
 
+    Why do we need this function?
+    The Chart Maker LLM needs to know the exact percentages and valuations of the user's portfolio
+    categories (like Sectors: Financials = 40%, Technology = 20%) to build visual chart configurations.
+    This function processes the raw data, sums cash and positions, resolves asset allocation fractions
+    (e.g., if a mutual fund is 50% equity and 50% bonds, it splits its value accordingly), and formatting
+    it into an organized text report.
+
     Args:
         portfolio_data: Dictionary mapping accounts, positions, and pricing metadata.
 
@@ -105,14 +112,14 @@ def analyze_portfolio(portfolio_data: Dict[str, Any]) -> str:
     result.append(f"Total Value: ₹{total_value:,.2f}")
     result.append(f"Number of Accounts: {len(account_totals)}")
     result.append(f"Number of Positions: {len(position_values)}")
- 
+  
     # Compile the account percentage distribution statements
     result.append("\nAccount Breakdown:")
     for name, data in account_totals.items():
         # pct: Compute weight of this account relative to the total portfolio value.
         pct = (data["value"] / total_value * 100) if total_value > 0 else 0
         result.append(f"  {name} ({data['type']}): ₹{data['value']:,.2f} ({pct:.1f}%)")
- 
+  
     # Compile top holdings breakdown by monetary value (sorted descending)
     result.append("\nTop Holdings by Value:")
     sorted_positions = sorted(position_values.items(), key=lambda x: x[1], reverse=True)[:10]
@@ -148,6 +155,7 @@ def analyze_portfolio(portfolio_data: Dict[str, Any]) -> str:
             
             # Aggregate asset classes distributions (e.g. equity, fixed income, commodities).
             # We multiply position value by allocation percentage and add to category total.
+            # Example: If a position is worth ₹10,000 and has 80% equity, we add ₹8,000 to the 'equity' bucket.
             for asset_class, pct in instrument.get("allocation_asset_class", {}).items():
                 asset_value = value * (pct / 100)
                 asset_classes[asset_class] = asset_classes.get(asset_class, 0.0) + asset_value

@@ -13,7 +13,14 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class ReporterContext:
-    """Holds context metrics representing the current user's job and portfolio details."""
+    """
+    Holds context metrics representing the current user's job and portfolio details.
+    
+    Attributes:
+        job_id: Analysis job UUID
+        portfolio_data: Dict containing user accounts and positions list
+        db: Initialized database client instance
+    """
     job_id: str
     portfolio_data: Dict[str, Any]
     db: Any = None
@@ -23,6 +30,18 @@ def format_portfolio(portfolio: Dict[str, Any]) -> str:
     """
     Format portfolio database collections into a clean, human-readable markdown segment.
     This serves as structural context within the LLM analyst's prompt.
+    
+    Why is this function used?
+    LLMs understand structured text like Markdown extremely well. Instead of sending raw JSON
+    to the LLM, we compile cash balances, tickers, shares, and current valuations into a nice,
+    scannable document.
+
+    How does it work?
+    1. It extracts years to retirement and target income.
+    2. It loops through accounts to show cash balances and positions.
+    3. For each position, it multiplies quantity by share price to calculate holding value.
+    4. It inspects 'allocation_asset_class' (e.g. {"equity": 80, "fixed_income": 20}) and dynamically
+       labels the asset with its dominant class (using max()).
     """
     lines = ["# Portfolio Summary"]
     years = portfolio.get("years_until_retirement", 25)
@@ -32,13 +51,13 @@ def format_portfolio(portfolio: Dict[str, Any]) -> str:
     lines.append("")
 
     total_val = 0.0
-    # Walk through each investment account in the user's portfolio
+    # Walk through each investment account in the user's portfolio (e.g. Demat, PPF, NPS)
     for account in portfolio.get("accounts", []):
         cash = float(account.get("cash_balance", 0))
         name = account.get("name", "Account")
         lines.append(f"\n## {name}  (Cash: ₹{cash:,.0f})")
         
-        # Walk holdings inside the account
+        # Walk holdings inside the current account
         for pos in account.get("positions", []):
             sym = pos.get("symbol", "")
             qty = float(pos.get("quantity") or 0)
@@ -47,7 +66,8 @@ def format_portfolio(portfolio: Dict[str, Any]) -> str:
             val = qty * price
             total_val += val
             
-            # Determine asset class segment
+            # Determine asset class segment by finding the key with the highest allocation percentage.
+            # Example: {"equity": 90, "fixed_income": 10} -> max() will return "equity".
             asset = (inst.get("allocation_asset_class") or {})
             cls = max(asset, key=asset.get) if asset else "?"
             lines.append(f"  - {sym}: {qty:,.0f} shares @ ₹{price:.2f} = ₹{val:,.0f}  [{cls}]")
@@ -60,6 +80,9 @@ async def get_market_insights(symbols: List[str]) -> str:
     """
     Stub method representing semantic query expansion.
     In local execution environments, returns a simple fallback message.
+    
+    In a fully featured implementation, this tool could perform search queries (e.g., via Google Search
+    or a vector database) to fetch recent news, analyst ratings, and earnings transcripts for the symbols.
     """
     if symbols:
         return (f"Live market research for {', '.join(symbols[:5])} is not configured in this local environment. "
@@ -70,6 +93,11 @@ async def get_market_insights(symbols: List[str]) -> str:
 def create_agent(job_id: str, portfolio: Dict[str, Any], db=None):
     """
     Constructs model configuration, tasks, system prompts, and tools for the Reporter.
+    
+    This configures the Report Writer agent:
+    1. Sets model ID (Bedrock/Moonshot Kimi).
+    2. Exposes 'get_market_insights' as a function tool the LLM can call if it needs ticker data.
+    3. Builds the task description by calling 'format_portfolio' to inject portfolio figures.
     """
     model_id = os.getenv("BEDROCK_MODEL_ID", "moonshotai.kimi-k2.5")
     bedrock_region = os.getenv("BEDROCK_REGION", "us-west-2")
@@ -90,7 +118,7 @@ def create_agent(job_id: str, portfolio: Dict[str, Any], db=None):
         }},
     ]
 
-    # Analysis task prompts
+    # Analysis task prompts defining the report guidelines
     task = (
         f"Analyse this Indian equity portfolio and write a comprehensive markdown report.\n\n"
         f"{format_portfolio(portfolio)}\n\n"
@@ -105,3 +133,4 @@ def create_agent(job_id: str, portfolio: Dict[str, Any], db=None):
     )
 
     return model, tools, task, context
+

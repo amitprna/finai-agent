@@ -17,6 +17,10 @@ logger = logging.getLogger()
 def calculate_portfolio_value(portfolio_data: Dict[str, Any]) -> float:
     """
     Sum the values of all holdings and cash accounts.
+    
+    How does it work?
+    1. It iterates over accounts and adds uninvested cash.
+    2. For each position, it multiplies quantity by the instrument current price (defaulting to 100.0 if missing).
     """
     total_value = 0.0
 
@@ -37,6 +41,12 @@ def calculate_asset_allocation(portfolio_data: Dict[str, Any]) -> Dict[str, floa
     """
     Calculate the aggregate portfolio weights per asset class.
     
+    Why do we need this?
+    To run a Monte Carlo simulation, we need to know the overall allocation of the portfolio
+    (e.g., 60% equities, 30% bonds, 10% cash). Since mutual funds or ETFs have split allocations,
+    we look up the asset class percentages inside each instrument and multiply it by the monetary
+    value of the holding.
+
     Returns:
         Dictionary mapping asset class string identifiers to decimal weights (e.g. {"equity": 0.7})
     """
@@ -48,6 +58,7 @@ def calculate_asset_allocation(portfolio_data: Dict[str, Any]) -> Dict[str, floa
     total_value = 0.0
 
     for account in portfolio_data.get("accounts", []):
+        # Accumulate cash values
         cash = float(account.get("cash_balance", 0.0))
         total_cash += cash
         total_value += cash
@@ -59,9 +70,10 @@ def calculate_asset_allocation(portfolio_data: Dict[str, Any]) -> Dict[str, floa
             value = quantity * price
             total_value += value
 
-            # Extract asset class allocation percentages
+            # Extract asset class allocation percentages (e.g., {"equity": 90.0, "fixed_income": 10.0})
             asset_allocation = instrument.get("allocation_asset_class", {})
             if asset_allocation:
+                # Add fractional monetary value to each asset class bucket
                 total_equity += value * asset_allocation.get("equity", 0.0) / 100.0
                 total_bonds += value * asset_allocation.get("fixed_income", 0.0) / 100.0
                 total_real_estate += value * asset_allocation.get("real_estate", 0.0) / 100.0
@@ -70,7 +82,7 @@ def calculate_asset_allocation(portfolio_data: Dict[str, Any]) -> Dict[str, floa
     if total_value == 0:
         return {"equity": 0.0, "bonds": 0.0, "real_estate": 0.0, "commodities": 0.0, "cash": 0.0}
 
-    # Return ratio distributions
+    # Normalize weights relative to total portfolio value (cash + assets)
     return {
         "equity": total_equity / total_value,
         "bonds": total_bonds / total_value,
@@ -90,17 +102,28 @@ def run_monte_carlo_simulation(
     """
     Runs a Monte Carlo simulation tracking wealth projections.
     
-    Inputs:
-      - historical returns parameters (annualized) for the Indian market
-      - standard deviations modeling market volatility
-    Outputs:
-      - success rates, median values, worst/best-case outcomes
+    What is a Monte Carlo simulation?
+    Instead of assuming a constant 8% market return every year, the simulation runs the portfolio's growth
+    hundreds of times (num_simulations=500) using random returns sampled from standard distributions.
+    This simulates real market volatility and sequence of returns risk.
+
+    How does it work?
+    1. Sets historical mean and standard deviations (volatilities) for Equities, Bonds, Real Estate, and Commodities.
+    2. Runs 500 scenarios. Each scenario has two stages:
+       - Phase 1: Accumulation (pre-retirement). Every year, we sample random returns for each asset class using
+         a Gaussian distribution (random.gauss), multiply by allocation weights, add returns, and add a savings
+         contribution of ₹1 Lakh.
+       - Phase 2: Retirement (post-retirement). We sample returns every year, and subtract an annual withdrawal
+         (initially target_annual_income, increased by 6% inflation every year).
+       - We count how many years the portfolio lasted (out of 30 years). If it survived all 30 years, it is a success.
+    3. We sort the final values to calculate percentiles (10th percentile = worst case, median = average case,
+       90th percentile = best case) and the overall success rate (percentage of successful scenarios).
     """
-    # Define historical mean/std returns parameters
-    equity_return_mean = 0.12
-    equity_return_std = 0.18
-    bond_return_mean = 0.07
-    bond_return_std = 0.05
+    # Define historical mean/std returns parameters for the Indian market context
+    equity_return_mean = 0.12     # 12% average annual equity return
+    equity_return_std = 0.18      # 18% volatility standard deviation
+    bond_return_mean = 0.07       # 7% average bond return
+    bond_return_std = 0.05        # 5% bond volatility
     real_estate_return_mean = 0.08
     real_estate_return_std = 0.12
     commodities_return_mean = 0.08
@@ -110,26 +133,28 @@ def run_monte_carlo_simulation(
     final_values = []
     years_lasted = []
 
+    # Run simulations
     for _ in range(num_simulations):
         portfolio_value = current_value
 
-        # Stage 1: Accumulation Phase
+        # Stage 1: Accumulation Phase (Pre-retirement growth)
         for _ in range(years_until_retirement):
-            # Model returns using Gaussian distributions
+            # Model returns using Gaussian distributions (bell curves) centered at the mean return
             equity_return = random.gauss(equity_return_mean, equity_return_std)
             bond_return = random.gauss(bond_return_mean, bond_return_std)
             real_estate_return = random.gauss(real_estate_return_mean, real_estate_return_std)
             commodities_return = random.gauss(commodities_return_mean, commodities_return_std)
 
+            # Calculate weighted return of the portfolio based on asset allocation
             portfolio_return = (
                 asset_allocation["equity"] * equity_return
                 + asset_allocation["bonds"] * bond_return
                 + asset_allocation["real_estate"] * real_estate_return
                 + asset_allocation.get("commodities", 0.0) * commodities_return
-                + asset_allocation["cash"] * 0.02
+                + asset_allocation["cash"] * 0.02  # Cash returns assumed flat 2%
             )
 
-            # Apply return yield and add annual savings contribution (assumed ₹1 Lakh)
+            # Apply return yield and add annual savings contribution (assumed flat ₹1 Lakh)
             portfolio_value = portfolio_value * (1 + portfolio_return)
             portfolio_value += 100000.0
 
@@ -142,9 +167,11 @@ def run_monte_carlo_simulation(
             if portfolio_value <= 0:
                 break
 
-            # Adjust withdrawal rate for inflation (assumed 6% per year in India)
+            # Adjust withdrawal rate for inflation (assumed 6% average inflation rate in India)
+            # This means the user withdraws 6% more cash every year to maintain purchase power
             annual_withdrawal *= 1.06
 
+            # Sample returns during the retirement phase
             equity_return = random.gauss(equity_return_mean, equity_return_std)
             bond_return = random.gauss(bond_return_mean, bond_return_std)
             real_estate_return = random.gauss(real_estate_return_mean, real_estate_return_std)
@@ -158,22 +185,25 @@ def run_monte_carlo_simulation(
                 + asset_allocation["cash"] * 0.02
             )
 
+            # Apply market returns and subtract the annual withdrawal
             portfolio_value = portfolio_value * (1 + portfolio_return) - annual_withdrawal
 
             if portfolio_value > 0:
                 years_income_lasted += 1
 
+        # Track results for this scenario
         final_values.append(max(0.0, portfolio_value))
         years_lasted.append(years_income_lasted)
 
+        # A scenario is a success if the portfolio survived the full retirement window
         if years_income_lasted >= retirement_years:
             successful_scenarios += 1
 
-    # Extract percentile statistics
+    # Extract percentile statistics by sorting the final values
     final_values.sort()
     success_rate = (successful_scenarios / num_simulations) * 100
 
-    # Calculate expected portfolio valuation at retirement
+    # Calculate expected portfolio valuation at retirement using flat expected returns (deterministic baseline)
     expected_return = (
         asset_allocation["equity"] * equity_return_mean
         + asset_allocation["bonds"] * bond_return_mean
@@ -189,8 +219,8 @@ def run_monte_carlo_simulation(
     return {
         "success_rate": round(success_rate, 1),
         "median_final_value": round(final_values[num_simulations // 2], 2),
-        "percentile_10": round(final_values[num_simulations // 10], 2),
-        "percentile_90": round(final_values[9 * num_simulations // 10], 2),
+        "percentile_10": round(final_values[num_simulations // 10], 2),  # 10th percentile (worst case)
+        "percentile_90": round(final_values[9 * num_simulations // 10], 2),  # 90th percentile (best case)
         "average_years_lasted": round(sum(years_lasted) / len(years_lasted), 1),
         "expected_value_at_retirement": round(expected_value_at_retirement, 2),
     }
@@ -204,6 +234,10 @@ def generate_projections(
 ) -> list:
     """
     Generates deterministic growth projections at 5-year milestones.
+    This creates the data points for the retirement readiness timeline.
+    
+    Expected returns are set slightly lower than Monte Carlo averages to simulate conservative returns:
+    - Equity: 7%, Bonds: 4%, Real Estate: 6%, Cash: 2%.
     """
     expected_return = (
         asset_allocation["equity"] * 0.07
@@ -215,6 +249,7 @@ def generate_projections(
 
     projections = []
     portfolio_value = current_value
+    # Generate data points every 5 years up to retirement + 30 years in retirement
     milestone_years = list(range(0, years_until_retirement + 31, 5))
 
     for year in milestone_years:
@@ -267,11 +302,11 @@ def create_agent(
     target_income = user_preferences.get("target_retirement_income", 800000.0)
     current_age = user_preferences.get("current_age", 40)
 
-    # Compute key figures
+    # Compute key figures (portfolio total and normalized class allocation ratios)
     portfolio_value = calculate_portfolio_value(portfolio_data)
     allocation = calculate_asset_allocation(portfolio_data)
 
-    # Execute simulation
+    # Execute simulation (500 scenarios)
     monte_carlo = run_monte_carlo_simulation(
         portfolio_value, years_until_retirement, target_income, allocation, num_simulations=500
     )
@@ -283,7 +318,9 @@ def create_agent(
 
     tools = []
 
-    # Compile the final task prompt containing simulation findings
+    # Compile the final task prompt containing simulation findings.
+    # This task prompt is loaded with the Monte Carlo results and Safe Withdrawal rate calculations,
+    # and instructs the Retirement Specialist agent to draft the final narrative assessment.
     task = f"""
 # Portfolio Analysis Context
 
@@ -335,3 +372,4 @@ Provide your analysis in clear markdown format with specific numbers and actiona
 """
 
     return model, tools, task
+

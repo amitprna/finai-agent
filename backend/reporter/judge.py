@@ -9,11 +9,15 @@ from pydantic import BaseModel, Field
 import os
 import logging
 
+# Set up the logger to capture logging outputs
 logger = logging.getLogger()
 
 
 class Evaluation(BaseModel):
-    """Structured Pydantic response format for the Judge evaluation model."""
+    """
+    Structured Pydantic response format for the Judge evaluation model.
+    By using a Pydantic class, we can enforce strict JSON schema outputs from the LLM.
+    """
     feedback: str = Field(
         description="Detailed review feedback on the report's quality, coverage, and layout consistency."
     )
@@ -26,6 +30,12 @@ async def evaluate(original_instructions: str, original_task: str, original_outp
     """
     Invokes LiteLLM to critique the generated report.
     
+    Why is this function used?
+    "LLM-as-a-Judge" is a common software pattern used to ensure output quality.
+    Instead of trusting the analyst agent blindly, a separate evaluator LLM inspects the generated report,
+    compares it against the original instructions, and assigns a grade. If the score is low,
+    the pipeline can alert developers or attempt regeneration (resilience).
+
     Args:
         original_instructions: System prompts used to instruct the analyst agent
         original_task: Task context payload given to the analyst agent
@@ -34,14 +44,14 @@ async def evaluate(original_instructions: str, original_task: str, original_outp
     Returns:
         An Evaluation instance containing comments and numeric score
     """
-    # Get model configuration
+    # Get model configuration from environment
     model_id = os.getenv("BEDROCK_MODEL_ID", "moonshotai.kimi-k2.5")
     bedrock_region = os.getenv("BEDROCK_REGION", "us-west-2")
     os.environ["AWS_REGION_NAME"] = bedrock_region
 
     model = f"bedrock/{model_id}"
 
-    # Instructions defining the critique criteria
+    # Instructions defining the critique criteria for the evaluator model
     instructions = """
 You are an Evaluation Agent that evaluates the quality of a financial report from a financial planning agent.
 You will be provided with the instructions that were sent to the analyst, and its output, and you must evaluate the quality of the output.
@@ -66,6 +76,9 @@ Evaluate this output and respond with your comments and score.
 
     try:
         logger.info("Judging financial report")
+        
+        # We request structured output from LiteLLM by passing response_format=Evaluation.
+        # This instructs the underlying LLM to reply only in JSON that perfectly fits our schema.
         response = await litellm.acompletion(
             model=model,
             messages=[
@@ -74,11 +87,14 @@ Evaluate this output and respond with your comments and score.
             ],
             response_format=Evaluation
         )
+        
         content = response.choices[0].message.content
+        # If the model returns a raw string, we parse it into the Pydantic class
         if isinstance(content, str):
             return Evaluation.model_validate_json(content)
         return content
     except Exception as e:
         logger.error(f"Error evaluating financial report: {e}")
-        # Return fallback quality evaluation on network or API failures
+        # Return fallback quality evaluation on network or API failures to keep the system resilient
         return Evaluation(feedback=f"Error evaluating financial report: {e}", score=80.0)
+
