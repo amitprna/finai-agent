@@ -358,3 +358,39 @@ Open the outputted **`CloudFrontUrl`** in your browser. All frontend traffic and
 1.  Sign up/Log in via the Cognito authentication prompt.
 2.  Add a Demat portfolio account and input equity symbols (e.g., `TCS.NS`, `NIFTYBEES.NS`).
 3.  Click **Run AI Analysis** to start the multi-agent execution pipeline. Traces are automatically grouped by `job_id` and logged to your Langfuse dashboard.
+
+---
+
+## 🧹 Destroying the Stacks (Tear-down)
+
+To avoid incurring charges on AWS for running services (such as running SageMaker inference endpoints, S3 vector storage, ECS Fargate containers, or Aurora PostgreSQL Serverless instances), destroy the stacks once you are done using the application.
+
+#### Option A: Destroy Stacks Individually
+If you want to tear down stacks layer-by-layer, do so in reverse order of deployment:
+
+1.  **Destroy the Frontend and API Gateway routing first**:
+    ```bash
+    npx cdk destroy FinaiFrontendStack --force
+    ```
+2.  **Destroy the Database and Agent compute resources second**:
+    ```bash
+    npx cdk destroy FinaiDatabaseAgentsStack --force
+    ```
+3.  **Destroy the SageMaker embeddings and Web scraping tools last**:
+    ```bash
+    npx cdk destroy FinaiResearcherStack --force
+    ```
+
+#### Option B: Destroy All Stacks at Once
+To tear down the entire infrastructure suite in a single command, execute:
+```bash
+npx cdk destroy --all --force
+```
+
+---
+
+> [!IMPORTANT]
+> **Manual Resource Cleanup Notice**
+> *   **S3 Buckets**: Deployed S3 buckets (like the S3 vector index database bucket) containing data will fail to delete automatically during `cdk destroy` as a safety mechanism. You must log in to the AWS S3 console, empty the bucket contents, and delete the bucket manually.
+> *   **CloudWatch Log Groups**: CloudWatch Log groups may be retained depending on stack removal configurations and can be cleaned up manually via the CloudWatch console.
+
