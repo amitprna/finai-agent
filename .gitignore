@@ -9,4 +9,4 @@ cdk.out
 .env
 # Virtual environments
 .venv
-artifacts
+artifacts/
