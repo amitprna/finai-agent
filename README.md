@@ -260,6 +260,10 @@ When `MOCK_LAMBDAS=true` is set:
 2.  **NodeJS & CDK**: Ensure Node.js is installed to run CDK commands.
 3.  **Docker**: Required to compile ECR container assets for the Researcher and Streamlit frontend.
 4.  **UV Python Manager**: `uv` is used for packaging backend lambda zip files and running local scripts.
+5.  **CDK Bootstrapping**: If this is a new AWS account/region, you must bootstrap it first so that CDK can provision deployment buckets:
+    ```bash
+    npx cdk bootstrap
+    ```
 
 ---
 

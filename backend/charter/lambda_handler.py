@@ -149,65 +149,6 @@ async def run_charter(job_id: str) -> dict:
     return {"success": bool(charts_data), "charts_generated": len(charts_data)}
 
 
-"""
-    {
-      "asset_class_distribution": {
-        "title": "Asset Class Distribution",
-        "type": "pie",
-        "description": "Portfolio allocation across major asset classes (INR)",
-        "data": [
-          { "name": "Equities", "value": 659000.50, "color": "#B85C43" },
-          { "name": "Bonds", "value": 141000.25, "color": "#7A8B75" },
-          { "name": "Real Estate", "value": 94000.00, "color": "#D49B48" },
-          { "name": "Cash", "value": 46000.00, "color": "#CBBFB4" }
-        ]
-      },
-      "geographic_exposure": {
-        "title": "Geographic Distribution",
-        "type": "bar",
-        "description": "Investment allocation by region",
-        "data": [
-          { "name": "Asia Pacific", "value": 741000.00, "color": "#D49B48" },
-          { "name": "North America", "value": 156340.00, "color": "#455A6F" },
-          { "name": "Europe", "value": 18780.00, "color": "#D8A499" },
-          { "name": "Emerging Markets", "value": 24700.00, "color": "#3C4048" }
-        ]
-      },
-      "sector_breakdown": {
-        "title": "Sector Allocation",
-        "type": "donut",
-        "description": "Distribution across industry sectors",
-        "data": [
-          { "name": "Financials", "value": 341000.00, "color": "#B85C43" },
-          { "name": "Technology", "value": 282000.00, "color": "#455A6F" },
-          { "name": "Consumer Staples", "value": 188000.00, "color": "#D49B48" },
-          { "name": "Energy", "value": 118000.00, "color": "#7A8B75" }
-        ]
-      },
-      "account_types": {
-        "title": "Account Distribution",
-        "type": "pie",
-        "description": "Allocation across different accounts",
-        "data": [
-          { "name": "EPF/PPF", "value": 450000.00, "color": "#7A8B75" },
-          { "name": "NPS", "value": 280000.00, "color": "#455A6F" },
-          { "name": "Demat Account", "value": 209200.75, "color": "#D49B48" }
-        ]
-      },
-      "top_holdings": {
-        "title": "Top 5 Holdings Concentration",
-        "type": "horizontalBar",
-        "description": "Largest security positions in the portfolio",
-        "data": [
-          { "name": "RELIANCE.NS", "value": 235000.00, "color": "#B85C43" },
-          { "name": "NIFTYBEES.NS", "value": 141000.00, "color": "#7A8B75" },
-          { "name": "TCS.NS", "value": 94000.00, "color": "#455A6F" },
-          { "name": "JUNIORBEES.NS", "value": 70500.00, "color": "#D49B48" },
-          { "name": "GOLDBEES.NS", "value": 47000.00, "color": "#CBBFB4" }
-        ]
-      }
-    }
-"""
 
 from observability import observe
 

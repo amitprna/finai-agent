@@ -136,6 +136,24 @@ async def run_orchestrator(job_id: str) -> None:
             # Convert Pydantic message object into a standard dictionary so we can append it to messages list
             messages.append(message.model_dump() if hasattr(message, "model_dump") else message.dict())
 
+            """
+                ChatCompletionMessage(
+                    content=None,
+                    role='assistant',
+                    function_call=None,
+                    tool_calls=[
+                        ChatCompletionMessageToolCall(
+                            id='call_abc123XYZ',
+                            function=Function(
+                                arguments='{"job_id": "5aa90c8b-da31-491d-9199-5e830d7e61a6"}',
+                                name='invoke_reporter'
+                            ),
+                            type='function'
+                        )
+                    ]
+                )
+
+            """
             # Check if the model requested to execute a tool (like calling a sub-agent)
             tool_calls = getattr(message, "tool_calls", None)
             if not tool_calls:
